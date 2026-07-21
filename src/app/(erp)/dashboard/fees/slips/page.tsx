@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { FileText, Paperclip } from "lucide-react";
 import { requireUser } from "@/lib/rbac";
-import { prisma } from "@/lib/prisma";
+import { prisma, safeQuery } from "@/lib/prisma";
 import {
   feeSummary,
   studentByUser,
@@ -35,19 +35,7 @@ function SlipRow({
   showStudent,
   showVerify,
 }: {
-  slip: {
-    id: string;
-    slipNo: string;
-    amount: number;
-    mode: string;
-    status: string;
-    forMonth: string | null;
-    receiptNo: string | null;
-    createdAt: Date;
-    proofImage: string | null;
-    txnRef: string | null;
-    student: { user: { name: string } };
-  };
+  slip: any;
   showStudent?: boolean;
   showVerify?: boolean;
 }) {
@@ -55,12 +43,12 @@ function SlipRow({
     <tr className="hover:bg-ivory/40">
       <td className="px-5 py-3.5 font-mono text-xs text-navy-600">{slip.slipNo}</td>
       {showStudent && (
-        <td className="px-5 py-3.5 font-medium text-navy-700">{slip.student.user.name}</td>
+        <td className="px-5 py-3.5 font-medium text-navy-700">{slip.student?.user?.name ?? "Student"}</td>
       )}
       <td className="px-5 py-3.5 font-medium text-navy-700">{inr(slip.amount)}</td>
       <td className="px-5 py-3.5 text-navy-500">{slip.mode}{slip.forMonth ? ` · ${slip.forMonth}` : ""}</td>
       <td className="px-5 py-3.5 text-navy-500 whitespace-nowrap">
-        {slip.createdAt.toLocaleDateString("en-IN", { day: "numeric", month: "short" })}
+        {slip.createdAt ? new Date(slip.createdAt).toLocaleDateString("en-IN", { day: "numeric", month: "short" }) : "—"}
       </td>
       <td className="px-5 py-3.5">
         <div className="flex items-center gap-2">
@@ -81,7 +69,7 @@ function SlipRow({
             <VerifyButton
               slipId={slip.id}
               slipNo={slip.slipNo}
-              studentName={slip.student.user.name}
+              studentName={slip.student?.user?.name ?? "Student"}
               amount={slip.amount}
               proofImage={slip.proofImage}
               txnRef={slip.txnRef}
@@ -100,14 +88,13 @@ function SlipRow({
 }
 
 async function StudentSlips({ userId }: { userId: string }) {
-  const student = await studentByUser(userId);
+  const student = await safeQuery(() => studentByUser(userId), null);
   if (!student) return <EmptyState message="Student profile not found." />;
-  const [fees, slips] = await Promise.all([
-    feeSummary(student.id),
-    slipsForStudents([student.id]),
-  ]);
+  
+  const fees = await safeQuery(() => feeSummary(student.id), { billed: 0, paid: 0, due: 0 });
+  const slips = await safeQuery(() => slipsForStudents([student.id]), []);
 
-  const opts = [{ id: student.id, label: student.user.name, due: fees.due }];
+  const opts = [{ id: student.id, label: student.user?.name ?? "Student", due: fees.due }];
 
   return (
     <>
@@ -127,17 +114,17 @@ async function StudentSlips({ userId }: { userId: string }) {
 }
 
 async function ParentSlips({ userId }: { userId: string }) {
-  const children = await childrenByParentUser(userId);
+  const children = await safeQuery(() => childrenByParentUser(userId), []);
   if (children.length === 0) return <EmptyState message="No linked children found." />;
 
   const opts = await Promise.all(
     children.map(async (c) => ({
       id: c.id,
-      label: `${c.user.name} (${c.rollNo})`,
-      due: (await feeSummary(c.id)).due,
+      label: `${c.user?.name ?? "Student"} (${c.rollNo})`,
+      due: (await safeQuery(() => feeSummary(c.id), { due: 0 })).due,
     }))
   );
-  const slips = await slipsForStudents(children.map((c) => c.id));
+  const slips = await safeQuery(() => slipsForStudents(children.map((c) => c.id)), []);
 
   return (
     <>
@@ -166,10 +153,8 @@ async function AdminSlips({
     date: sp.date || undefined,
   };
 
-  const [slips, batches] = await Promise.all([
-    allSlips(filters),
-    prisma.batch.findMany({ select: { id: true, name: true } }),
-  ]);
+  const slips = await safeQuery(() => allSlips(filters), []);
+  const batches = await safeQuery(() => prisma.batch.findMany({ select: { id: true, name: true } }), []);
 
   const pending = slips.filter((s) => s.status === "PENDING").length;
   const paidTotal = slips
@@ -252,7 +237,7 @@ function SlipTable({
   showStudent,
   showVerify,
 }: {
-  slips: Parameters<typeof SlipRow>[0]["slip"][];
+  slips: any[];
   showStudent?: boolean;
   showVerify?: boolean;
 }) {

@@ -1,5 +1,5 @@
 import { requireUser } from "@/lib/rbac";
-import { prisma } from "@/lib/prisma";
+import { prisma, safeQuery } from "@/lib/prisma";
 import { studentByUser, childrenByParentUser } from "@/lib/dal";
 import { PageTitle, Panel, EmptyState, StatCard } from "@/components/erp/ui";
 import { AskDoubtButton } from "./AskDoubtButton";
@@ -34,16 +34,20 @@ const include = {
 } as const;
 
 async function StudentView({ userId }: { userId: string }) {
-  const student = await studentByUser(userId);
+  const student = await safeQuery(() => studentByUser(userId), null);
   if (!student) return <EmptyState message="Student profile not found." />;
-  const [doubts, batches] = await Promise.all([
-    prisma.doubt.findMany({
-      where: { studentId: student.id },
-      include,
-      orderBy: { createdAt: "desc" },
-    }),
-    Promise.resolve(student.enrollments.map((e) => ({ id: e.batch.id, name: e.batch.name }))),
-  ]);
+  
+  const doubts = await safeQuery(
+    () =>
+      prisma.doubt.findMany({
+        where: { studentId: student.id },
+        include,
+        orderBy: { createdAt: "desc" },
+      }),
+    []
+  );
+
+  const batches = (student.enrollments || []).map((e) => ({ id: e.batch?.id, name: e.batch?.name ?? "Batch" })).filter(b => b.id);
 
   return (
     <>
@@ -63,11 +67,15 @@ async function TeacherView({ role, userId }: { role: string; userId: string }) {
       ? {}
       : { OR: [{ batch: { teacher: { userId } } }, { batchId: null }] };
 
-  const doubts = await prisma.doubt.findMany({
-    where,
-    include,
-    orderBy: [{ answeredAt: "asc" }, { createdAt: "desc" }],
-  });
+  const doubts = await safeQuery(
+    () =>
+      prisma.doubt.findMany({
+        where,
+        include,
+        orderBy: [{ answeredAt: "asc" }, { createdAt: "desc" }],
+      }),
+    []
+  );
   const pending = doubts.filter((d) => !d.answer).length;
 
   return (
@@ -84,13 +92,17 @@ async function TeacherView({ role, userId }: { role: string; userId: string }) {
 }
 
 async function ParentView({ userId }: { userId: string }) {
-  const children = await childrenByParentUser(userId);
+  const children = await safeQuery(() => childrenByParentUser(userId), []);
   if (children.length === 0) return <EmptyState message="No linked children found." />;
-  const doubts = await prisma.doubt.findMany({
-    where: { studentId: { in: children.map((c) => c.id) } },
-    include,
-    orderBy: { createdAt: "desc" },
-  });
+  const doubts = await safeQuery(
+    () =>
+      prisma.doubt.findMany({
+        where: { studentId: { in: children.map((c) => c.id) } },
+        include,
+        orderBy: { createdAt: "desc" },
+      }),
+    []
+  );
   return (
     <>
       <PageTitle title="Doubts" subtitle="Doubts raised by your children and their answers." />
@@ -104,7 +116,7 @@ function DoubtList({
   canAnswer,
   showStudent,
 }: {
-  doubts: DoubtRow[];
+  doubts: any[];
   canAnswer?: boolean;
   showStudent?: boolean;
 }) {
@@ -127,10 +139,10 @@ function DoubtList({
             )}
             {d.batch && <span className="text-xs text-navy-400">{d.batch.name}</span>}
             {showStudent && (
-              <span className="text-xs font-medium text-navy-500">· {d.student.user.name}</span>
+              <span className="text-xs font-medium text-navy-500">· {d.student?.user?.name ?? "Student"}</span>
             )}
             <span className="ml-auto text-[11px] text-navy-400">
-              {d.createdAt.toLocaleDateString("en-IN", { day: "numeric", month: "short" })}
+              {d.createdAt ? new Date(d.createdAt).toLocaleDateString("en-IN", { day: "numeric", month: "short" }) : "—"}
             </span>
           </div>
 

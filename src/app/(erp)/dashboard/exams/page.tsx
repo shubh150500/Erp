@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { Printer } from "lucide-react";
 import { requireUser } from "@/lib/rbac";
-import { prisma } from "@/lib/prisma";
+import { prisma, safeQuery } from "@/lib/prisma";
 import { marksByStudent, studentByUser, childrenByParentUser } from "@/lib/dal";
 import { PageTitle, Panel, EmptyState, StatCard } from "@/components/erp/ui";
 import { NewExamButton, MarksEditor } from "./ExamsClient";
@@ -19,34 +19,41 @@ export default async function ExamsPage() {
 
 async function ManageView({ role, userId }: { role: string; userId: string }) {
   const where = role === "TEACHER" ? { teacher: { userId } } : {};
-  const [batches, exams] = await Promise.all([
-    prisma.batch.findMany({ where, select: { id: true, name: true } }),
-    prisma.exam.findMany({
-      where: { batch: where },
-      include: {
-        batch: {
-          include: {
-            enrollments: { include: { student: { include: { user: true } } } },
+  
+  const batches = await safeQuery(
+    () => prisma.batch.findMany({ where, select: { id: true, name: true } }),
+    []
+  );
+
+  const exams = await safeQuery(
+    () =>
+      prisma.exam.findMany({
+        where: { batch: where },
+        include: {
+          batch: {
+            include: {
+              enrollments: { include: { student: { include: { user: true } } } },
+            },
           },
+          marks: true,
         },
-        marks: true,
-      },
-      orderBy: { date: "desc" },
-    }),
-  ]);
+        orderBy: { date: "desc" },
+      }),
+    []
+  );
 
   const examData = exams.map((e) => ({
     id: e.id,
     title: e.title,
     subject: e.subject,
     maxMarks: e.maxMarks,
-    batchName: e.batch.name,
-    students: e.batch.enrollments.map((en) => ({
-      id: en.student.id,
-      name: en.student.user.name,
-      rollNo: en.student.rollNo,
-    })),
-    scores: Object.fromEntries(e.marks.map((m) => [m.studentId, m.score])),
+    batchName: e.batch?.name ?? "Batch",
+    students: (e.batch?.enrollments || []).map((en) => ({
+      id: en.student?.id,
+      name: en.student?.user?.name ?? "Student",
+      rollNo: en.student?.rollNo ?? "—",
+    })).filter((s) => s.id),
+    scores: Object.fromEntries((e.marks || []).map((m) => [m.studentId, m.score])),
   }));
 
   return (
@@ -106,10 +113,10 @@ function grade(pct: number) {
 }
 
 async function ReportCard({ studentId, title }: { studentId: string; title: string }) {
-  const marks = await marksByStudent(studentId);
+  const marks = await safeQuery(() => marksByStudent(studentId), []);
 
   const totals = marks.reduce(
-    (t, m) => ({ score: t.score + m.score, max: t.max + m.exam.maxMarks }),
+    (t, m) => ({ score: t.score + m.score, max: t.max + (m.exam?.maxMarks ?? 0) }),
     { score: 0, max: 0 }
   );
   const overallPct = totals.max ? Math.round((totals.score / totals.max) * 100) : null;
@@ -151,12 +158,13 @@ async function ReportCard({ studentId, title }: { studentId: string; title: stri
               </thead>
               <tbody className="divide-y divide-navy-100">
                 {marks.map((m) => {
-                  const pct = Math.round((m.score / m.exam.maxMarks) * 100);
+                  const maxMarks = m.exam?.maxMarks ?? 100;
+                  const pct = Math.round((m.score / maxMarks) * 100);
                   return (
                     <tr key={m.id} className="hover:bg-ivory/40">
-                      <td className="px-5 py-3.5 font-medium text-navy-700">{m.exam.title}</td>
-                      <td className="px-5 py-3.5 text-navy-600">{m.exam.subject}</td>
-                      <td className="px-5 py-3.5 text-navy-600">{m.score} / {m.exam.maxMarks}</td>
+                      <td className="px-5 py-3.5 font-medium text-navy-700">{m.exam?.title ?? "Exam"}</td>
+                      <td className="px-5 py-3.5 text-navy-600">{m.exam?.subject ?? "—"}</td>
+                      <td className="px-5 py-3.5 text-navy-600">{m.score} / {maxMarks}</td>
                       <td className="px-5 py-3.5 text-navy-600">{pct}%</td>
                       <td className="px-5 py-3.5 font-semibold text-navy-700">{grade(pct)}</td>
                     </tr>
@@ -172,18 +180,18 @@ async function ReportCard({ studentId, title }: { studentId: string; title: stri
 }
 
 async function StudentReport({ userId }: { userId: string }) {
-  const student = await studentByUser(userId);
+  const student = await safeQuery(() => studentByUser(userId), null);
   if (!student) return <EmptyState message="Student profile not found." />;
   return (
     <>
       <PageTitle title="My Results" subtitle="Your exam performance and report card." />
-      <ReportCard studentId={student.id} title={`${student.user.name} · ${student.className}`} />
+      <ReportCard studentId={student.id} title={`${student.user?.name ?? "Student"} · ${student.className}`} />
     </>
   );
 }
 
 async function ParentReport({ userId }: { userId: string }) {
-  const children = await childrenByParentUser(userId);
+  const children = await safeQuery(() => childrenByParentUser(userId), []);
   return (
     <>
       <PageTitle title="Results" subtitle="Report cards for your children." />
@@ -191,7 +199,7 @@ async function ParentReport({ userId }: { userId: string }) {
         <EmptyState message="No linked children found." />
       ) : (
         children.map((c) => (
-          <ReportCard key={c.id} studentId={c.id} title={`${c.user.name} · ${c.className}`} />
+          <ReportCard key={c.id} studentId={c.id} title={`${c.user?.name ?? "Student"} · ${c.className}`} />
         ))
       )}
     </>
