@@ -8,16 +8,24 @@ export default async function ErpLayout({
   children: React.ReactNode;
 }) {
   const user = await requireUser();
-  const { unread, items } = await notificationsFor(user.id);
+  
+  let unread = 0;
+  let notifications: any[] = [];
 
-  const notifications = items.map((n) => ({
-    id: n.id,
-    title: n.title,
-    body: n.body,
-    href: n.href,
-    read: n.read,
-    createdAt: n.createdAt.toISOString(),
-  }));
+  try {
+    const res = await notificationsFor(user.id).catch(() => ({ unread: 0, items: [] }));
+    unread = res.unread;
+    notifications = (res.items || []).map((n) => ({
+      id: n.id,
+      title: n.title,
+      body: n.body,
+      href: n.href,
+      read: n.read,
+      createdAt: n.createdAt ? n.createdAt.toISOString() : new Date().toISOString(),
+    }));
+  } catch (err) {
+    console.error("Notifications fetch failed:", err);
+  }
 
   return (
     <DashboardShell
