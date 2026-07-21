@@ -1,6 +1,6 @@
 import { FileText, Download } from "lucide-react";
 import { requireUser } from "@/lib/rbac";
-import { prisma } from "@/lib/prisma";
+import { prisma, safeQuery } from "@/lib/prisma";
 import {
   manageableBatches,
   studentByUser,
@@ -34,15 +34,19 @@ export default async function MaterialsPage() {
 
 async function materialsForBatches(batchIds: string[]): Promise<MatRow[]> {
   if (batchIds.length === 0) return [];
-  return prisma.studyMaterial.findMany({
-    where: { batchId: { in: batchIds } },
-    include: { batch: { select: { name: true } } },
-    orderBy: { createdAt: "desc" },
-  });
+  return safeQuery(
+    () =>
+      prisma.studyMaterial.findMany({
+        where: { batchId: { in: batchIds } },
+        include: { batch: { select: { name: true } } },
+        orderBy: { createdAt: "desc" },
+      }),
+    []
+  );
 }
 
 async function ManageView({ role, userId }: { role: string; userId: string }) {
-  const batches = await manageableBatches(userId, role);
+  const batches = await safeQuery(() => manageableBatches(userId, role), []);
   const list = await materialsForBatches(batches.map((b) => b.id));
   return (
     <>
@@ -62,9 +66,10 @@ async function ManageView({ role, userId }: { role: string; userId: string }) {
 }
 
 async function StudentView({ userId }: { userId: string }) {
-  const student = await studentByUser(userId);
+  const student = await safeQuery(() => studentByUser(userId), null);
   if (!student) return <EmptyState message="Student profile not found." />;
-  const list = await materialsForBatches(await studentBatchIds(student.id));
+  const bIds = await safeQuery(() => studentBatchIds(student.id), []);
+  const list = await materialsForBatches(bIds);
   return (
     <>
       <PageTitle title="Study Material" subtitle="Notes and PDFs shared by your teachers." />
@@ -74,9 +79,9 @@ async function StudentView({ userId }: { userId: string }) {
 }
 
 async function ParentView({ userId }: { userId: string }) {
-  const children = await childrenByParentUser(userId);
+  const children = await safeQuery(() => childrenByParentUser(userId), []);
   if (children.length === 0) return <EmptyState message="No linked children found." />;
-  const batchIds = (await Promise.all(children.map((c) => studentBatchIds(c.id)))).flat();
+  const batchIds = (await Promise.all(children.map((c) => safeQuery(() => studentBatchIds(c.id), [])))).flat();
   const list = await materialsForBatches([...new Set(batchIds)]);
   return (
     <>
@@ -112,8 +117,8 @@ function MaterialList({ list, canManage }: { list: MatRow[]; canManage?: boolean
                 )}
               </div>
               <p className="text-xs text-navy-400">
-                {m.batch.name} ·{" "}
-                {m.createdAt.toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" })}
+                {m.batch?.name ?? "Batch"} ·{" "}
+                {m.createdAt ? new Date(m.createdAt).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" }) : "—"}
               </p>
             </div>
             <div className="flex items-center gap-4 shrink-0">

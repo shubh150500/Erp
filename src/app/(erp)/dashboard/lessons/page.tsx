@@ -1,6 +1,6 @@
 import { CalendarClock, BookText } from "lucide-react";
 import { requireRole } from "@/lib/rbac";
-import { prisma } from "@/lib/prisma";
+import { prisma, safeQuery } from "@/lib/prisma";
 import { manageableBatches } from "@/lib/dal";
 import { PageTitle, Panel, EmptyState, StatCard } from "@/components/erp/ui";
 import { CreateLessonButton } from "./CreateLessonButton";
@@ -23,16 +23,19 @@ type Lesson = {
 
 export default async function LessonsPage() {
   const user = await requireRole(["ADMIN", "TEACHER"]);
-  const batches = await manageableBatches(user.id, user.role);
+  const batches = await safeQuery(() => manageableBatches(user.id, user.role), []);
   const batchIds = batches.map((b) => b.id);
 
-  const lessons: Lesson[] =
-    batchIds.length === 0
-      ? []
-      : await prisma.lessonPlan.findMany({
-          where: { batchId: { in: batchIds } },
-          orderBy: [{ status: "asc" }, { plannedDate: "asc" }, { createdAt: "asc" }],
-        });
+  const lessons: Lesson[] = await safeQuery(
+    () =>
+      batchIds.length === 0
+        ? Promise.resolve([])
+        : prisma.lessonPlan.findMany({
+            where: { batchId: { in: batchIds } },
+            orderBy: [{ status: "asc" }, { plannedDate: "asc" }, { createdAt: "asc" }],
+          }),
+    []
+  );
 
   const done = lessons.filter((l) => l.status === "DONE").length;
   const total = lessons.length;
@@ -119,7 +122,7 @@ export default async function LessonsPage() {
                                   {l.plannedDate && (
                                     <span className="mt-1 inline-flex items-center gap-1 text-xs text-gold-700">
                                       <CalendarClock size={12} />
-                                      {l.plannedDate.toLocaleDateString("en-IN", { day: "numeric", month: "short" })}
+                                      {new Date(l.plannedDate).toLocaleDateString("en-IN", { day: "numeric", month: "short" })}
                                     </span>
                                   )}
                                   {isDone && l.logNote && (

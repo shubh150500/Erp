@@ -1,6 +1,6 @@
 import { Paperclip, CalendarClock } from "lucide-react";
 import { requireUser } from "@/lib/rbac";
-import { prisma } from "@/lib/prisma";
+import { prisma, safeQuery } from "@/lib/prisma";
 import {
   manageableBatches,
   studentByUser,
@@ -35,15 +35,19 @@ export default async function HomeworkPage() {
 
 async function homeworkForBatches(batchIds: string[]): Promise<HwRow[]> {
   if (batchIds.length === 0) return [];
-  return prisma.homework.findMany({
-    where: { batchId: { in: batchIds } },
-    include: { batch: { select: { name: true } } },
-    orderBy: { createdAt: "desc" },
-  });
+  return safeQuery(
+    () =>
+      prisma.homework.findMany({
+        where: { batchId: { in: batchIds } },
+        include: { batch: { select: { name: true } } },
+        orderBy: { createdAt: "desc" },
+      }),
+    []
+  );
 }
 
 async function ManageView({ role, userId }: { role: string; userId: string }) {
-  const batches = await manageableBatches(userId, role);
+  const batches = await safeQuery(() => manageableBatches(userId, role), []);
   const list = await homeworkForBatches(batches.map((b) => b.id));
 
   return (
@@ -64,9 +68,10 @@ async function ManageView({ role, userId }: { role: string; userId: string }) {
 }
 
 async function StudentView({ userId }: { userId: string }) {
-  const student = await studentByUser(userId);
+  const student = await safeQuery(() => studentByUser(userId), null);
   if (!student) return <EmptyState message="Student profile not found." />;
-  const list = await homeworkForBatches(await studentBatchIds(student.id));
+  const bIds = await safeQuery(() => studentBatchIds(student.id), []);
+  const list = await homeworkForBatches(bIds);
   return (
     <>
       <PageTitle title="Homework" subtitle="Homework assigned to your batches." />
@@ -76,10 +81,10 @@ async function StudentView({ userId }: { userId: string }) {
 }
 
 async function ParentView({ userId }: { userId: string }) {
-  const children = await childrenByParentUser(userId);
+  const children = await safeQuery(() => childrenByParentUser(userId), []);
   if (children.length === 0) return <EmptyState message="No linked children found." />;
   const batchIds = (
-    await Promise.all(children.map((c) => studentBatchIds(c.id)))
+    await Promise.all(children.map((c) => safeQuery(() => studentBatchIds(c.id), [])))
   ).flat();
   const list = await homeworkForBatches([...new Set(batchIds)]);
   return (
@@ -102,7 +107,7 @@ function HomeworkList({ list, canManage }: { list: HwRow[]; canManage?: boolean 
   return (
     <div className="space-y-4">
       {list.map((hw) => {
-        const overdue = hw.dueDate && hw.dueDate < today;
+        const overdue = hw.dueDate && new Date(hw.dueDate) < today;
         return (
           <Panel key={hw.id} className="p-5">
             <div className="flex flex-wrap items-start justify-between gap-3">
@@ -114,7 +119,7 @@ function HomeworkList({ list, canManage }: { list: HwRow[]; canManage?: boolean 
                       {hw.subject}
                     </span>
                   )}
-                  <span className="text-xs text-navy-400">· {hw.batch.name}</span>
+                  <span className="text-xs text-navy-400">· {hw.batch?.name ?? "Batch"}</span>
                 </div>
                 <p className="mt-2 whitespace-pre-line text-sm text-navy-600">{hw.details}</p>
               </div>
@@ -126,11 +131,11 @@ function HomeworkList({ list, canManage }: { list: HwRow[]; canManage?: boolean 
                     }`}
                   >
                     <CalendarClock size={13} />
-                    Due {hw.dueDate.toLocaleDateString("en-IN", { day: "numeric", month: "short" })}
+                    Due {new Date(hw.dueDate).toLocaleDateString("en-IN", { day: "numeric", month: "short" })}
                   </span>
                 )}
                 <p className="mt-1 text-[11px] text-navy-400">
-                  {hw.createdAt.toLocaleDateString("en-IN", { day: "numeric", month: "short" })}
+                  {hw.createdAt ? new Date(hw.createdAt).toLocaleDateString("en-IN", { day: "numeric", month: "short" }) : "—"}
                 </p>
               </div>
             </div>

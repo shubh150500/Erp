@@ -1,6 +1,6 @@
 import { CalendarClock, BookMarked } from "lucide-react";
 import { requireUser } from "@/lib/rbac";
-import { prisma } from "@/lib/prisma";
+import { prisma, safeQuery } from "@/lib/prisma";
 import { manageableBatches, studentByUser, studentBatchIds, childrenByParentUser } from "@/lib/dal";
 import { PageTitle, Panel, EmptyState } from "@/components/erp/ui";
 import { ScheduleTestButton } from "./ScheduleTestButton";
@@ -18,7 +18,6 @@ type TestRow = {
   batch: { name: string };
 };
 
-/** Start of today (local). */
 function startOfToday() {
   const d = new Date();
   d.setHours(0, 0, 0, 0);
@@ -26,7 +25,7 @@ function startOfToday() {
 }
 
 function daysUntil(date: Date) {
-  const ms = date.getTime() - startOfToday().getTime();
+  const ms = new Date(date).getTime() - startOfToday().getTime();
   const days = Math.round(ms / 86_400_000);
   if (days === 0) return "Today";
   if (days === 1) return "Tomorrow";
@@ -35,11 +34,15 @@ function daysUntil(date: Date) {
 
 async function upcomingForBatches(batchIds: string[]): Promise<TestRow[]> {
   if (batchIds.length === 0) return [];
-  return prisma.exam.findMany({
-    where: { batchId: { in: batchIds }, date: { gte: startOfToday() } },
-    include: { batch: { select: { name: true } } },
-    orderBy: { date: "asc" },
-  });
+  return safeQuery(
+    () =>
+      prisma.exam.findMany({
+        where: { batchId: { in: batchIds }, date: { gte: startOfToday() } },
+        include: { batch: { select: { name: true } } },
+        orderBy: { date: "asc" },
+      }),
+    []
+  );
 }
 
 export default async function TestsPage() {
@@ -51,7 +54,7 @@ export default async function TestsPage() {
 }
 
 async function ManageView({ role, userId }: { role: string; userId: string }) {
-  const batches = await manageableBatches(userId, role);
+  const batches = await safeQuery(() => manageableBatches(userId, role), []);
   const list = await upcomingForBatches(batches.map((b) => b.id));
   return (
     <>
@@ -71,9 +74,10 @@ async function ManageView({ role, userId }: { role: string; userId: string }) {
 }
 
 async function StudentView({ userId }: { userId: string }) {
-  const student = await studentByUser(userId);
+  const student = await safeQuery(() => studentByUser(userId), null);
   if (!student) return <EmptyState message="Student profile not found." />;
-  const list = await upcomingForBatches(await studentBatchIds(student.id));
+  const bIds = await safeQuery(() => studentBatchIds(student.id), []);
+  const list = await upcomingForBatches(bIds);
   return (
     <>
       <PageTitle title="Test Schedule" subtitle="Upcoming tests for your batches." />
@@ -83,9 +87,9 @@ async function StudentView({ userId }: { userId: string }) {
 }
 
 async function ParentView({ userId }: { userId: string }) {
-  const children = await childrenByParentUser(userId);
+  const children = await safeQuery(() => childrenByParentUser(userId), []);
   if (children.length === 0) return <EmptyState message="No linked children found." />;
-  const batchIds = (await Promise.all(children.map((c) => studentBatchIds(c.id)))).flat();
+  const batchIds = (await Promise.all(children.map((c) => safeQuery(() => studentBatchIds(c.id), [])))).flat();
   const list = await upcomingForBatches([...new Set(batchIds)]);
   return (
     <>
@@ -106,15 +110,15 @@ function TestList({ list, canManage }: { list: TestRow[]; canManage?: boolean })
   return (
     <div className="space-y-4">
       {list.map((t) => {
-        const near = t.date.getTime() - startOfToday().getTime() <= 3 * 86_400_000;
+        const near = new Date(t.date).getTime() - startOfToday().getTime() <= 3 * 86_400_000;
         return (
           <Panel key={t.id} className="p-5">
             <div className="flex flex-wrap items-start justify-between gap-3">
               <div className="flex items-start gap-3">
                 <span className="grid h-11 w-11 shrink-0 flex-col place-items-center rounded-xl bg-navy-700 text-ivory leading-none">
-                  <span className="text-sm font-bold">{t.date.getDate()}</span>
+                  <span className="text-sm font-bold mt-1.5">{new Date(t.date).getDate()}</span>
                   <span className="text-[10px] uppercase">
-                    {t.date.toLocaleDateString("en-IN", { month: "short" })}
+                    {new Date(t.date).toLocaleDateString("en-IN", { month: "short" })}
                   </span>
                 </span>
                 <div>
@@ -123,7 +127,7 @@ function TestList({ list, canManage }: { list: TestRow[]; canManage?: boolean })
                     <span className="rounded-full bg-navy-700/5 px-2.5 py-0.5 text-xs font-medium text-navy-600">
                       {t.subject}
                     </span>
-                    <span className="text-xs text-navy-400">· {t.batch.name}</span>
+                    <span className="text-xs text-navy-400">· {t.batch?.name ?? "Batch"}</span>
                   </div>
                   {t.syllabus && (
                     <p className="mt-2 flex items-start gap-1.5 text-sm text-navy-600">
