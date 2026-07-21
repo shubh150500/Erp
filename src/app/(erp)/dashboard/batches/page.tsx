@@ -1,5 +1,5 @@
 import { requireRole } from "@/lib/rbac";
-import { prisma } from "@/lib/prisma";
+import { prisma, safeQuery } from "@/lib/prisma";
 import { PageTitle, Panel, EmptyState } from "@/components/erp/ui";
 import { AddBatchButton } from "./AddBatchButton";
 
@@ -8,20 +8,30 @@ export const metadata = { title: "Batches" };
 export default async function BatchesPage() {
   await requireRole(["ADMIN"]);
 
-  const [batches, courses, teachers] = await Promise.all([
-    prisma.batch.findMany({
-      include: {
-        course: true,
-        teacher: { include: { user: true } },
-        _count: { select: { enrollments: true } },
-      },
-      orderBy: { createdAt: "desc" },
-    }),
-    prisma.course.findMany({ select: { id: true, name: true } }),
-    prisma.teacher.findMany({ include: { user: true } }),
-  ]);
+  const batches = await safeQuery(
+    () =>
+      prisma.batch.findMany({
+        include: {
+          course: true,
+          teacher: { include: { user: true } },
+          _count: { select: { enrollments: true } },
+        },
+        orderBy: { createdAt: "desc" },
+      }),
+    []
+  );
 
-  const teacherOpts = teachers.map((t) => ({ id: t.id, name: t.user.name }));
+  const courses = await safeQuery(
+    () => prisma.course.findMany({ select: { id: true, name: true } }),
+    []
+  );
+
+  const teachers = await safeQuery(
+    () => prisma.teacher.findMany({ include: { user: true } }),
+    []
+  );
+
+  const teacherOpts = teachers.map((t) => ({ id: t.id, name: t.user?.name ?? "Teacher" }));
 
   return (
     <>
@@ -50,12 +60,12 @@ export default async function BatchesPage() {
                 {batches.map((b) => (
                   <tr key={b.id} className="hover:bg-ivory/40">
                     <td className="px-5 py-3.5 font-medium text-navy-700">{b.name}</td>
-                    <td className="px-5 py-3.5 text-navy-600">{b.course.name}</td>
+                    <td className="px-5 py-3.5 text-navy-600">{b.course?.name ?? "Course"}</td>
                     <td className="px-5 py-3.5 text-navy-500">{b.year}</td>
                     <td className="px-5 py-3.5 text-navy-500">
-                      {b.teacher?.user.name ?? "—"}
+                      {b.teacher?.user?.name ?? "—"}
                     </td>
-                    <td className="px-5 py-3.5 text-navy-500">{b._count.enrollments}</td>
+                    <td className="px-5 py-3.5 text-navy-500">{b._count?.enrollments ?? 0}</td>
                     <td className="px-5 py-3.5 font-medium text-navy-700">
                       ₹{b.feeAmount.toLocaleString("en-IN")}
                     </td>

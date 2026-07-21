@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { IdCard } from "lucide-react";
 import { requireRole } from "@/lib/rbac";
-import { prisma } from "@/lib/prisma";
+import { prisma, safeQuery } from "@/lib/prisma";
 import { PageTitle, Panel, EmptyState } from "@/components/erp/ui";
 import { AddStudentButton } from "./AddStudentButton";
 import { TransferBatchButton } from "./TransferBatchButton";
@@ -11,17 +11,23 @@ export const metadata = { title: "Students" };
 export default async function StudentsPage() {
   const user = await requireRole(["ADMIN", "TEACHER"]);
 
-  const [students, batches] = await Promise.all([
-    prisma.student.findMany({
-      include: {
-        user: true,
-        enrollments: { include: { batch: true } },
-        _count: { select: { payments: true } },
-      },
-      orderBy: { rollNo: "asc" },
-    }),
-    prisma.batch.findMany({ select: { id: true, name: true } }),
-  ]);
+  const students = await safeQuery(
+    () =>
+      prisma.student.findMany({
+        include: {
+          user: true,
+          enrollments: { include: { batch: true } },
+          _count: { select: { payments: true } },
+        },
+        orderBy: { rollNo: "asc" },
+      }),
+    []
+  );
+
+  const batches = await safeQuery(
+    () => prisma.batch.findMany({ select: { id: true, name: true } }),
+    []
+  );
 
   return (
     <>
@@ -50,12 +56,12 @@ export default async function StudentsPage() {
                 {students.map((s) => (
                   <tr key={s.id} className="hover:bg-ivory/40">
                     <td className="px-5 py-3.5 font-mono text-xs text-navy-600">{s.rollNo}</td>
-                    <td className="px-5 py-3.5 font-medium text-navy-700">{s.user.name}</td>
+                    <td className="px-5 py-3.5 font-medium text-navy-700">{s.user?.name ?? "Student"}</td>
                     <td className="px-5 py-3.5 text-navy-600">{s.className}</td>
                     <td className="px-5 py-3.5 text-navy-500">
-                      {s.enrollments.map((e) => e.batch.name).join(", ") || "—"}
+                      {s.enrollments?.map((e) => e.batch?.name).filter(Boolean).join(", ") || "—"}
                     </td>
-                    <td className="px-5 py-3.5 text-navy-500">{s.user.email}</td>
+                    <td className="px-5 py-3.5 text-navy-500">{s.user?.email ?? "—"}</td>
                     {user.role === "ADMIN" && (
                       <td className="px-5 py-3.5">
                         <div className="flex items-center justify-end gap-4">
@@ -67,8 +73,8 @@ export default async function StudentsPage() {
                           </Link>
                           <TransferBatchButton
                             studentId={s.id}
-                            studentName={s.user.name}
-                            currentBatches={s.enrollments.map((e) => ({ id: e.batch.id, name: e.batch.name }))}
+                            studentName={s.user?.name ?? "Student"}
+                            currentBatches={s.enrollments?.map((e) => ({ id: e.batch?.id, name: e.batch?.name })).filter(b => b.id && b.name) || []}
                             allBatches={batches}
                           />
                         </div>
