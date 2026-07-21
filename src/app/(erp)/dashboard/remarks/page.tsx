@@ -1,6 +1,6 @@
 import { NotebookPen } from "lucide-react";
 import { requireUser } from "@/lib/rbac";
-import { prisma } from "@/lib/prisma";
+import { prisma, safeQuery } from "@/lib/prisma";
 import { studentByUser, childrenByParentUser } from "@/lib/dal";
 import { PageTitle, Panel, EmptyState } from "@/components/erp/ui";
 import { AddRemarkButton } from "./AddRemarkButton";
@@ -15,10 +15,13 @@ type RemarkRow = {
   student: { user: { name: string } };
 };
 
-/** Attach the author's name to each remark. */
 async function withTeacherNames(rows: RemarkRow[]) {
+  if (rows.length === 0) return [];
   const ids = [...new Set(rows.map((r) => r.teacherId))];
-  const users = await prisma.user.findMany({ where: { id: { in: ids } }, select: { id: true, name: true } });
+  const users = await safeQuery(
+    () => prisma.user.findMany({ where: { id: { in: ids } }, select: { id: true, name: true } }),
+    []
+  );
   const map = new Map(users.map((u) => [u.id, u.name]));
   return rows.map((r) => ({ ...r, teacherName: map.get(r.teacherId) ?? "Teacher" }));
 }
@@ -37,21 +40,29 @@ async function ManageView({ role, userId }: { role: string; userId: string }) {
     role === "TEACHER"
       ? { enrollments: { some: { batch: { teacher: { userId } } } } }
       : {};
-  const [students, remarks] = await Promise.all([
-    prisma.student.findMany({
-      where: studentWhere,
-      include: { user: true },
-      orderBy: { user: { name: "asc" } },
-    }),
-    prisma.remark.findMany({
-      where: role === "TEACHER" ? { teacherId: userId } : {},
-      include: { student: { include: { user: true } } },
-      orderBy: { createdAt: "desc" },
-    }),
-  ]);
 
-  const opts = students.map((s) => ({ id: s.id, label: `${s.user.name} (${s.rollNo})` }));
-  const list = await withTeacherNames(remarks);
+  const students = await safeQuery(
+    () =>
+      prisma.student.findMany({
+        where: studentWhere,
+        include: { user: true },
+        orderBy: { user: { name: "asc" } },
+      }),
+    []
+  );
+
+  const remarks = await safeQuery(
+    () =>
+      prisma.remark.findMany({
+        where: role === "TEACHER" ? { teacherId: userId } : {},
+        include: { student: { include: { user: true } } },
+        orderBy: { createdAt: "desc" },
+      }),
+    []
+  );
+
+  const opts = students.map((s) => ({ id: s.id, label: `${s.user?.name ?? "Student"} (${s.rollNo})` }));
+  const list = await withTeacherNames(remarks as any[]);
 
   return (
     <>
@@ -66,14 +77,20 @@ async function ManageView({ role, userId }: { role: string; userId: string }) {
 }
 
 async function StudentView({ userId }: { userId: string }) {
-  const student = await studentByUser(userId);
+  const student = await safeQuery(() => studentByUser(userId), null);
   if (!student) return <EmptyState message="Student profile not found." />;
-  const remarks = await prisma.remark.findMany({
-    where: { studentId: student.id },
-    include: { student: { include: { user: true } } },
-    orderBy: { createdAt: "desc" },
-  });
-  const list = await withTeacherNames(remarks);
+  
+  const remarks = await safeQuery(
+    () =>
+      prisma.remark.findMany({
+        where: { studentId: student.id },
+        include: { student: { include: { user: true } } },
+        orderBy: { createdAt: "desc" },
+      }),
+    []
+  );
+  
+  const list = await withTeacherNames(remarks as any[]);
   return (
     <>
       <PageTitle title="Teacher Remarks" subtitle="Feedback your teachers have shared." />
@@ -83,14 +100,20 @@ async function StudentView({ userId }: { userId: string }) {
 }
 
 async function ParentView({ userId }: { userId: string }) {
-  const children = await childrenByParentUser(userId);
+  const children = await safeQuery(() => childrenByParentUser(userId), []);
   if (children.length === 0) return <EmptyState message="No linked children found." />;
-  const remarks = await prisma.remark.findMany({
-    where: { studentId: { in: children.map((c) => c.id) } },
-    include: { student: { include: { user: true } } },
-    orderBy: { createdAt: "desc" },
-  });
-  const list = await withTeacherNames(remarks);
+
+  const remarks = await safeQuery(
+    () =>
+      prisma.remark.findMany({
+        where: { studentId: { in: children.map((c) => c.id) } },
+        include: { student: { include: { user: true } } },
+        orderBy: { createdAt: "desc" },
+      }),
+    []
+  );
+
+  const list = await withTeacherNames(remarks as any[]);
   return (
     <>
       <PageTitle title="Teacher Remarks" subtitle="Feedback teachers have shared about your children." />
@@ -103,7 +126,7 @@ function RemarkList({
   rows,
   showStudent,
 }: {
-  rows: (RemarkRow & { teacherName: string })[];
+  rows: any[];
   showStudent?: boolean;
 }) {
   if (rows.length === 0) {
@@ -124,9 +147,9 @@ function RemarkList({
             <div className="flex-1">
               <p className="text-sm text-navy-700 whitespace-pre-line">{r.body}</p>
               <p className="mt-2 text-xs text-navy-400">
-                {showStudent && <span className="font-medium text-navy-500">{r.student.user.name} · </span>}
+                {showStudent && <span className="font-medium text-navy-500">{r.student?.user?.name ?? "Student"} · </span>}
                 {r.teacherName} ·{" "}
-                {r.createdAt.toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" })}
+                {r.createdAt ? new Date(r.createdAt).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" }) : "—"}
               </p>
             </div>
           </div>

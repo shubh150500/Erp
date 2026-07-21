@@ -1,5 +1,6 @@
 import { Sheet, FileDown } from "lucide-react";
 import { requireRole } from "@/lib/rbac";
+import { prisma, safeQuery } from "@/lib/prisma";
 import { ledgerEntries, resolvePeriod, type LedgerKind } from "@/lib/ledger";
 import { PageTitle, Panel, EmptyState, StatCard } from "@/components/erp/ui";
 import { AddIncomeButton } from "./AddIncomeButton";
@@ -26,7 +27,11 @@ export default async function AccountingPage({
   const sp = await searchParams;
   const now = new Date();
   const period = resolvePeriod(sp, now);
-  const { entries, totals } = await ledgerEntries(period.range);
+
+  const { entries, totals } = await safeQuery(
+    () => ledgerEntries(period.range),
+    { entries: [], totals: { income: 0, outflow: 0, net: 0, feeIncome: 0, otherIncome: 0, expenses: 0, salaries: 0 } }
+  );
 
   const years = Array.from({ length: 4 }, (_, i) => now.getFullYear() - i);
   const qs = new URLSearchParams({
@@ -60,7 +65,6 @@ export default async function AccountingPage({
         }
       />
 
-      {/* Period summary */}
       <div className="grid gap-5 sm:grid-cols-2 lg:grid-cols-3 mb-5">
         <StatCard label="Total income" value={inr(totals.income)} tone="green" hint={`Fees ${inr(totals.feeIncome)} · Other ${inr(totals.otherIncome)}`} />
         <StatCard label="Total outflow" value={inr(totals.outflow)} tone="red" hint={`Expenses ${inr(totals.expenses)} · Salaries ${inr(totals.salaries)}`} />
@@ -71,7 +75,6 @@ export default async function AccountingPage({
         />
       </div>
 
-      {/* Period filter */}
       <form className="mb-7 flex flex-wrap items-end gap-3">
         <label className="block">
           <span className="block text-xs font-semibold uppercase tracking-wider text-navy-400 mb-1">View</span>
@@ -129,7 +132,7 @@ export default async function AccountingPage({
                   return (
                     <tr key={`${e.kind}-${e.id}`} className="hover:bg-ivory/40">
                       <td className="px-5 py-3 text-navy-500 whitespace-nowrap">
-                        {e.date.toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" })}
+                        {e.date ? new Date(e.date).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" }) : "—"}
                       </td>
                       <td className="px-5 py-3">
                         <span className={`inline-flex rounded-full px-2.5 py-0.5 text-xs font-semibold ${meta.tone}`}>

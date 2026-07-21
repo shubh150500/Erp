@@ -1,6 +1,6 @@
 import { Flag, Lightbulb } from "lucide-react";
 import { requireUser } from "@/lib/rbac";
-import { prisma } from "@/lib/prisma";
+import { prisma, safeQuery } from "@/lib/prisma";
 import { PageTitle, Panel, EmptyState, StatCard } from "@/components/erp/ui";
 import { SubmitComplaintButton } from "./SubmitComplaintButton";
 import { RespondForm } from "./RespondForm";
@@ -21,10 +21,14 @@ type Row = {
 export default async function ComplaintsPage() {
   const user = await requireUser();
   if (user.role === "STUDENT" || user.role === "PARENT") {
-    const rows = await prisma.complaint.findMany({
-      where: { userId: user.id },
-      orderBy: { createdAt: "desc" },
-    });
+    const rows = await safeQuery(
+      () =>
+        prisma.complaint.findMany({
+          where: { userId: user.id },
+          orderBy: { createdAt: "desc" },
+        }),
+      []
+    );
     return (
       <>
         <PageTitle
@@ -41,12 +45,21 @@ export default async function ComplaintsPage() {
 }
 
 async function AdminView() {
-  const rows = await prisma.complaint.findMany({ orderBy: [{ status: "asc" }, { createdAt: "desc" }] });
-  const names = await prisma.user.findMany({
-    where: { id: { in: [...new Set(rows.map((r) => r.userId))] } },
-    select: { id: true, name: true, role: true },
-  });
-  const map = new Map(names.map((u) => [u.id, u]));
+  const rows = await safeQuery(() => prisma.complaint.findMany({ orderBy: [{ status: "asc" }, { createdAt: "desc" }] }), []);
+  
+  let map = new Map<string, any>();
+  if (rows.length > 0) {
+    const names = await safeQuery(
+      () =>
+        prisma.user.findMany({
+          where: { id: { in: [...new Set(rows.map((r) => r.userId))] } },
+          select: { id: true, name: true, role: true },
+        }),
+      []
+    );
+    map = new Map(names.map((u) => [u.id, u]));
+  }
+  
   const open = rows.filter((r) => r.status === "OPEN").length;
 
   return (
@@ -113,7 +126,7 @@ function ComplaintList({
                 </div>
                 <p className="mt-1.5 whitespace-pre-line text-sm text-navy-600">{r.body}</p>
                 <p className="mt-1 text-[11px] text-navy-400">
-                  {r.createdAt.toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" })}
+                  {r.createdAt ? new Date(r.createdAt).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" }) : "—"}
                 </p>
 
                 {r.response ? (

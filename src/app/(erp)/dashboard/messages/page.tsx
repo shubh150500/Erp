@@ -1,6 +1,6 @@
 import { Send, Users, UsersRound } from "lucide-react";
 import { requireRole } from "@/lib/rbac";
-import { prisma } from "@/lib/prisma";
+import { prisma, safeQuery } from "@/lib/prisma";
 import { manageableBatches } from "@/lib/dal";
 import { PageTitle, Panel, EmptyState, StatCard } from "@/components/erp/ui";
 import { SendBroadcastButton } from "./SendBroadcastButton";
@@ -19,18 +19,25 @@ export default async function MessagesPage() {
   const batches = await manageableBatches(user.id, user.role);
 
   const isAdmin = user.role === "ADMIN";
-  const messages = await prisma.broadcastMessage.findMany({
-    where: isAdmin ? {} : { sentById: user.id },
-    orderBy: { createdAt: "desc" },
-  });
+  const messages = await safeQuery(
+    () =>
+      prisma.broadcastMessage.findMany({
+        where: isAdmin ? {} : { sentById: user.id },
+        orderBy: { createdAt: "desc" },
+      }),
+    []
+  );
 
-  // Resolve sender names for the admin view.
   let senderName: (id: string) => string = () => "";
-  if (isAdmin) {
-    const senders = await prisma.user.findMany({
-      where: { id: { in: [...new Set(messages.map((m) => m.sentById))] } },
-      select: { id: true, name: true },
-    });
+  if (isAdmin && messages.length > 0) {
+    const senders = await safeQuery(
+      () =>
+        prisma.user.findMany({
+          where: { id: { in: [...new Set(messages.map((m) => m.sentById))] } },
+          select: { id: true, name: true },
+        }),
+      []
+    );
     const map = new Map(senders.map((s) => [s.id, s.name]));
     senderName = (id) => map.get(id) ?? "Unknown";
   }
@@ -73,7 +80,7 @@ export default async function MessagesPage() {
                   <div className="flex flex-wrap items-center justify-between gap-2">
                     <h3 className="font-semibold text-navy-700">{m.title}</h3>
                     <span className="text-xs text-navy-400 whitespace-nowrap">
-                      {m.createdAt.toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" })}
+                      {m.createdAt ? new Date(m.createdAt).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" }) : "—"}
                     </span>
                   </div>
                   <p className="mt-1.5 whitespace-pre-line text-sm text-navy-600 leading-relaxed">{m.body}</p>

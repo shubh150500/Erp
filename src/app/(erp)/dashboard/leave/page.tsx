@@ -1,6 +1,6 @@
 import { CalendarDays } from "lucide-react";
 import { requireUser } from "@/lib/rbac";
-import { prisma } from "@/lib/prisma";
+import { prisma, safeQuery } from "@/lib/prisma";
 import { studentByUser, childrenByParentUser } from "@/lib/dal";
 import { PageTitle, Panel, EmptyState, StatCard, StatusPill } from "@/components/erp/ui";
 import { ApplyLeaveButton } from "./ApplyLeaveButton";
@@ -19,25 +19,29 @@ type Row = {
 };
 
 const include = { student: { include: { user: true } } } as const;
-const fmt = (d: Date) => d.toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" });
+const fmt = (d: Date) => d ? new Date(d).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" }) : "—";
 
 export default async function LeavePage() {
   const user = await requireUser();
 
   if (user.role === "STUDENT") {
-    const student = await studentByUser(user.id);
+    const student = await safeQuery(() => studentByUser(user.id), null);
     if (!student) return <EmptyState message="Student profile not found." />;
-    const rows = await prisma.leaveApplication.findMany({
-      where: { studentId: student.id },
-      include,
-      orderBy: { createdAt: "desc" },
-    });
+    const rows = await safeQuery(
+      () =>
+        prisma.leaveApplication.findMany({
+          where: { studentId: student.id },
+          include,
+          orderBy: { createdAt: "desc" },
+        }),
+      []
+    );
     return (
       <>
         <PageTitle
           title="Leave Applications"
           subtitle="Apply for leave and track approval status."
-          action={<ApplyLeaveButton students={[{ id: student.id, label: student.user.name }]} />}
+          action={<ApplyLeaveButton students={[{ id: student.id, label: student.user?.name ?? "Student" }]} />}
         />
         <LeaveList rows={rows} />
       </>
@@ -45,34 +49,41 @@ export default async function LeavePage() {
   }
 
   if (user.role === "PARENT") {
-    const children = await childrenByParentUser(user.id);
-    const rows = await prisma.leaveApplication.findMany({
-      where: { studentId: { in: children.map((c) => c.id) } },
-      include,
-      orderBy: { createdAt: "desc" },
-    });
+    const children = await safeQuery(() => childrenByParentUser(user.id), []);
+    const rows = await safeQuery(
+      () =>
+        prisma.leaveApplication.findMany({
+          where: { studentId: { in: children.map((c) => c.id) } },
+          include,
+          orderBy: { createdAt: "desc" },
+        }),
+      []
+    );
     return (
       <>
         <PageTitle
           title="Leave Applications"
           subtitle="Apply for your children's leave and track approvals."
-          action={<ApplyLeaveButton students={children.map((c) => ({ id: c.id, label: `${c.user.name} (${c.rollNo})` }))} />}
+          action={<ApplyLeaveButton students={children.map((c) => ({ id: c.id, label: `${c.user?.name ?? "Student"} (${c.rollNo})` }))} />}
         />
         <LeaveList rows={rows} showStudent />
       </>
     );
   }
 
-  // TEACHER / ADMIN
   const where =
     user.role === "TEACHER"
       ? { student: { enrollments: { some: { batch: { teacher: { userId: user.id } } } } } }
       : {};
-  const rows = await prisma.leaveApplication.findMany({
-    where,
-    include,
-    orderBy: [{ status: "asc" }, { createdAt: "desc" }],
-  });
+  const rows = await safeQuery(
+    () =>
+      prisma.leaveApplication.findMany({
+        where,
+        include,
+        orderBy: [{ status: "asc" }, { createdAt: "desc" }],
+      }),
+    []
+  );
   const pending = rows.filter((r) => r.status === "PENDING").length;
 
   return (
@@ -120,7 +131,7 @@ function LeaveList({
                   </p>
                   <StatusPill status={r.status} />
                 </div>
-                {showStudent && <p className="text-xs font-medium text-navy-500">{r.student.user.name}</p>}
+                {showStudent && <p className="text-xs font-medium text-navy-500">{r.student?.user?.name ?? "Student"}</p>}
                 <p className="mt-1.5 text-sm text-navy-600">{r.reason}</p>
               </div>
             </div>

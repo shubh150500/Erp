@@ -1,6 +1,6 @@
 import { TrendingUp, TrendingDown, Scale, Sheet, FileDown, Paperclip } from "lucide-react";
 import { requireRole } from "@/lib/rbac";
-import { prisma } from "@/lib/prisma";
+import { prisma, safeQuery } from "@/lib/prisma";
 import { financeStats } from "@/lib/finance-stats";
 import { PageTitle, Panel, EmptyState, StatCard } from "@/components/erp/ui";
 import { AddExpenseButton } from "./AddExpenseButton";
@@ -27,7 +27,6 @@ const catTone: Record<string, string> = {
   OTHER: "bg-gray-100 text-gray-600",
 };
 
-/** Inclusive [start, end) range for the given year-month, or the whole of `year`. */
 function range(year: number, month: number | null) {
   if (month === null) {
     return { gte: new Date(year, 0, 1), lt: new Date(year + 1, 0, 1) };
@@ -35,7 +34,6 @@ function range(year: number, month: number | null) {
   return { gte: new Date(year, month, 1), lt: new Date(year, month + 1, 1) };
 }
 
-/** Last `count` months as {year, month, label}, oldest first. */
 function lastMonths(count: number) {
   const now = new Date();
   const out: { year: number; month: number; label: string }[] = [];
@@ -62,29 +60,16 @@ export default async function FinancePage({
   const trend = lastMonths(12);
   const trendSince = new Date(trend[0].year, trend[0].month, 1);
 
-  const [payments, expenses, salaryPayments, stats, trendPayments, trendExpenses, trendSalaries] =
-    await Promise.all([
-      prisma.payment.findMany({
-        where: { paidAt: r },
-        select: { amount: true },
-      }),
-      prisma.expense.findMany({
-        where: { spentAt: r },
-        orderBy: { spentAt: "desc" },
-      }),
-      prisma.salaryPayment.findMany({
-        where: { paidAt: r },
-        select: { amount: true },
-      }),
-      financeStats(),
-      prisma.payment.findMany({ where: { paidAt: { gte: trendSince } }, select: { amount: true, paidAt: true } }),
-      prisma.expense.findMany({ where: { spentAt: { gte: trendSince } }, select: { amount: true, spentAt: true } }),
-      prisma.salaryPayment.findMany({ where: { paidAt: { gte: trendSince } }, select: { amount: true, paidAt: true } }),
-    ]);
+  const payments = await safeQuery(() => prisma.payment.findMany({ where: { paidAt: r }, select: { amount: true } }), []);
+  const expenses = await safeQuery(() => prisma.expense.findMany({ where: { spentAt: r }, orderBy: { spentAt: "desc" } }), []);
+  const salaryPayments = await safeQuery(() => prisma.salaryPayment.findMany({ where: { paidAt: r }, select: { amount: true } }), []);
+  const stats = await safeQuery(() => financeStats(), { today: 0, week: 0, month: 0, year: 0, revenue: 0, expenses: 0, salaries: 0, net: 0, dues: 0, pendingCount: 0, pendingAmount: 0 });
+  const trendPayments = await safeQuery(() => prisma.payment.findMany({ where: { paidAt: { gte: trendSince } }, select: { amount: true, paidAt: true } }), []);
+  const trendExpenses = await safeQuery(() => prisma.expense.findMany({ where: { spentAt: { gte: trendSince } }, select: { amount: true, spentAt: true } }), []);
+  const trendSalaries = await safeQuery(() => prisma.salaryPayment.findMany({ where: { paidAt: { gte: trendSince } }, select: { amount: true, paidAt: true } }), []);
 
-  // 12-month income (fees) vs outflow (expenses + salaries) series.
   const series = trend.map((m) => {
-    const inMonth = (d: Date) => d.getFullYear() === m.year && d.getMonth() === m.month;
+    const inMonth = (d: Date) => d && new Date(d).getFullYear() === m.year && new Date(d).getMonth() === m.month;
     const income = trendPayments.filter((p) => inMonth(p.paidAt)).reduce((s, p) => s + p.amount, 0);
     const outflow =
       trendExpenses.filter((e) => inMonth(e.spentAt)).reduce((s, e) => s + e.amount, 0) +
@@ -135,7 +120,6 @@ export default async function FinancePage({
         }
       />
 
-      {/* All-time collection dashboard */}
       <div className="grid gap-5 sm:grid-cols-2 lg:grid-cols-4 mb-5">
         <StatCard label="Today's collection" value={inr(stats.today)} tone="green" />
         <StatCard label="This week" value={inr(stats.week)} tone="green" />
@@ -267,7 +251,7 @@ export default async function FinancePage({
                       </td>
                       <td className="px-5 py-3.5 font-medium text-navy-700">{inr(e.amount)}</td>
                       <td className="px-5 py-3.5 text-navy-500 whitespace-nowrap">
-                        {e.spentAt.toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" })}
+                        {e.spentAt ? new Date(e.spentAt).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" }) : "—"}
                       </td>
                       <td className="px-5 py-3.5 text-right">
                         <div className="inline-flex items-center gap-3">

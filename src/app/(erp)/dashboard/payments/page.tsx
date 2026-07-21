@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { FileText, Sheet } from "lucide-react";
 import { requireUser } from "@/lib/rbac";
-import { prisma } from "@/lib/prisma";
+import { prisma, safeQuery } from "@/lib/prisma";
 import { studentByUser, childrenByParentUser } from "@/lib/dal";
 import { PageTitle, Panel, EmptyState, StatCard } from "@/components/erp/ui";
 
@@ -29,26 +29,34 @@ const include = {
 export default async function PaymentsPage() {
   const user = await requireUser();
   if (user.role === "STUDENT") {
-    const student = await studentByUser(user.id);
+    const student = await safeQuery(() => studentByUser(user.id), null);
     if (!student) return <EmptyState message="Student profile not found." />;
-    const rows = await prisma.payment.findMany({
-      where: { studentId: student.id },
-      include,
-      orderBy: { paidAt: "desc" },
-    });
+    const rows = await safeQuery(
+      () =>
+        prisma.payment.findMany({
+          where: { studentId: student.id },
+          include,
+          orderBy: { paidAt: "desc" },
+        }),
+      []
+    );
     return <View title="Payment History" subtitle="All your fee payments and receipts." rows={rows} />;
   }
   if (user.role === "PARENT") {
-    const children = await childrenByParentUser(user.id);
-    const rows = await prisma.payment.findMany({
-      where: { studentId: { in: children.map((c) => c.id) } },
-      include,
-      orderBy: { paidAt: "desc" },
-    });
+    const children = await safeQuery(() => childrenByParentUser(user.id), []);
+    const rows = await safeQuery(
+      () =>
+        prisma.payment.findMany({
+          where: { studentId: { in: children.map((c) => c.id) } },
+          include,
+          orderBy: { paidAt: "desc" },
+        }),
+      []
+    );
     return <View title="Payment History" subtitle="Fee payments for your children." rows={rows} showStudent />;
   }
   if (user.role === "ADMIN") {
-    const rows = await prisma.payment.findMany({ include, orderBy: { paidAt: "desc" } });
+    const rows = await safeQuery(() => prisma.payment.findMany({ include, orderBy: { paidAt: "desc" } }), []);
     return <View title="Fee Collection" subtitle="All fee payments collected." rows={rows} showStudent />;
   }
   return <EmptyState message="Payment history is not available for this role." />;
@@ -69,7 +77,7 @@ function View({
   const thisMonth = rows
     .filter((r) => {
       const now = new Date();
-      return r.paidAt.getMonth() === now.getMonth() && r.paidAt.getFullYear() === now.getFullYear();
+      return r.paidAt && new Date(r.paidAt).getMonth() === now.getMonth() && new Date(r.paidAt).getFullYear() === now.getFullYear();
     })
     .reduce((s, r) => s + r.amount, 0);
 
@@ -115,7 +123,7 @@ function View({
                   <tr key={r.id} className="hover:bg-ivory/40">
                     <td className="px-5 py-3.5 font-mono text-xs text-navy-600">{r.receiptNo}</td>
                     {showStudent && (
-                      <td className="px-5 py-3.5 font-medium text-navy-700">{r.student.user.name}</td>
+                      <td className="px-5 py-3.5 font-medium text-navy-700">{r.student?.user?.name ?? "Student"}</td>
                     )}
                     <td className="px-5 py-3.5 font-medium text-navy-700">{inr(r.amount)}</td>
                     <td className="px-5 py-3.5 text-navy-500">
@@ -123,7 +131,7 @@ function View({
                       {r.forMonth ? ` · ${r.forMonth}` : ""}
                     </td>
                     <td className="px-5 py-3.5 text-navy-500 whitespace-nowrap">
-                      {r.paidAt.toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" })}
+                      {r.paidAt ? new Date(r.paidAt).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" }) : "—"}
                     </td>
                     <td className="px-5 py-3.5 text-right">
                       {r.feeSlip ? (

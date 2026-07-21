@@ -1,6 +1,6 @@
 import { Megaphone } from "lucide-react";
 import { requireUser } from "@/lib/rbac";
-import { prisma } from "@/lib/prisma";
+import { prisma, safeQuery } from "@/lib/prisma";
 import { PageTitle, Panel, EmptyState } from "@/components/erp/ui";
 import { NewNoticeButton } from "./NewNoticeButton";
 
@@ -17,11 +17,15 @@ export default async function NoticesPage() {
   const user = await requireUser();
   const canPost = user.role === "ADMIN" || user.role === "TEACHER";
 
-  const notices = await prisma.notice.findMany({
-    where: { audience: { in: audienceForRole[user.role] } },
-    include: { author: true },
-    orderBy: { createdAt: "desc" },
-  });
+  const notices = await safeQuery(
+    () =>
+      prisma.notice.findMany({
+        where: { audience: { in: audienceForRole[user.role] } },
+        include: { author: true },
+        orderBy: { createdAt: "desc" },
+      }),
+    []
+  );
 
   return (
     <>
@@ -46,14 +50,14 @@ export default async function NoticesPage() {
                   <div className="flex items-center justify-between gap-3">
                     <h3 className="font-semibold text-navy-700">{n.title}</h3>
                     <span className="text-xs text-navy-400 whitespace-nowrap">
-                      {n.createdAt.toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" })}
+                      {n.createdAt ? new Date(n.createdAt).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" }) : "—"}
                     </span>
                   </div>
                   <p className="mt-1.5 text-sm text-navy-600 leading-relaxed whitespace-pre-line">
                     {n.body}
                   </p>
                   <p className="mt-3 text-xs text-navy-400">
-                    {n.author.name} · for {n.audience.toLowerCase()}
+                    {n.author?.name ?? "Office"} · for {n.audience.toLowerCase()}
                   </p>
                 </div>
               </div>

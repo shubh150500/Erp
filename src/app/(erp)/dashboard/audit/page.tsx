@@ -1,5 +1,5 @@
 import { requireRole } from "@/lib/rbac";
-import { prisma } from "@/lib/prisma";
+import { prisma, safeQuery } from "@/lib/prisma";
 import { PageTitle, Panel, EmptyState } from "@/components/erp/ui";
 
 export const metadata = { title: "Audit Log" };
@@ -33,11 +33,15 @@ export default async function AuditPage({
   const sp = await searchParams;
   const action = sp.action && ACTIONS.includes(sp.action as (typeof ACTIONS)[number]) ? sp.action : undefined;
 
-  const logs = await prisma.auditLog.findMany({
-    where: action ? { action } : {},
-    orderBy: { createdAt: "desc" },
-    take: 300,
-  });
+  const logs = await safeQuery(
+    () =>
+      prisma.auditLog.findMany({
+        where: action ? { action } : {},
+        orderBy: { createdAt: "desc" },
+        take: 300,
+      }),
+    []
+  );
 
   return (
     <>
@@ -82,13 +86,13 @@ export default async function AuditPage({
                 {logs.map((l) => (
                   <tr key={l.id} className="hover:bg-ivory/40">
                     <td className="px-5 py-3.5 text-navy-500 whitespace-nowrap">
-                      {l.createdAt.toLocaleString("en-IN", {
+                      {l.createdAt ? new Date(l.createdAt).toLocaleString("en-IN", {
                         day: "numeric",
                         month: "short",
                         year: "numeric",
                         hour: "2-digit",
                         minute: "2-digit",
-                      })}
+                      }) : "—"}
                     </td>
                     <td className="px-5 py-3.5 font-medium text-navy-700">{l.actorName}</td>
                     <td className="px-5 py-3.5">

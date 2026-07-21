@@ -1,6 +1,6 @@
 import { UserCheck } from "lucide-react";
 import { requireUser } from "@/lib/rbac";
-import { prisma } from "@/lib/prisma";
+import { prisma, safeQuery } from "@/lib/prisma";
 import { studentByUser, childrenByParentUser } from "@/lib/dal";
 import { PageTitle, Panel, EmptyState, StatCard, StatusPill } from "@/components/erp/ui";
 import { RequestPtmButton } from "./RequestPtmButton";
@@ -18,7 +18,7 @@ type Row = {
 
 const include = { student: { include: { user: true } } } as const;
 const fmt = (d: Date) =>
-  d.toLocaleString("en-IN", { day: "numeric", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" });
+  d ? new Date(d).toLocaleString("en-IN", { day: "numeric", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" }) : "—";
 
 export default async function PtmPage() {
   const user = await requireUser();
@@ -27,20 +27,24 @@ export default async function PtmPage() {
     let opts: { id: string; label: string }[] = [];
     let studentIds: string[] = [];
     if (user.role === "STUDENT") {
-      const s = await studentByUser(user.id);
+      const s = await safeQuery(() => studentByUser(user.id), null);
       if (!s) return <EmptyState message="Student profile not found." />;
-      opts = [{ id: s.id, label: s.user.name }];
+      opts = [{ id: s.id, label: s.user?.name ?? "Student" }];
       studentIds = [s.id];
     } else {
-      const children = await childrenByParentUser(user.id);
-      opts = children.map((c) => ({ id: c.id, label: `${c.user.name} (${c.rollNo})` }));
+      const children = await safeQuery(() => childrenByParentUser(user.id), []);
+      opts = children.map((c) => ({ id: c.id, label: `${c.user?.name ?? "Student"} (${c.rollNo})` }));
       studentIds = children.map((c) => c.id);
     }
-    const rows = await prisma.ptmBooking.findMany({
-      where: { studentId: { in: studentIds } },
-      include,
-      orderBy: { slot: "desc" },
-    });
+    const rows = await safeQuery(
+      () =>
+        prisma.ptmBooking.findMany({
+          where: { studentId: { in: studentIds } },
+          include,
+          orderBy: { slot: "desc" },
+        }),
+      []
+    );
     return (
       <>
         <PageTitle
@@ -53,16 +57,19 @@ export default async function PtmPage() {
     );
   }
 
-  // TEACHER / ADMIN
   const where =
     user.role === "TEACHER"
       ? { student: { enrollments: { some: { batch: { teacher: { userId: user.id } } } } } }
       : {};
-  const rows = await prisma.ptmBooking.findMany({
-    where,
-    include,
-    orderBy: [{ status: "asc" }, { slot: "desc" }],
-  });
+  const rows = await safeQuery(
+    () =>
+      prisma.ptmBooking.findMany({
+        where,
+        include,
+        orderBy: [{ status: "asc" }, { slot: "desc" }],
+      }),
+    []
+  );
   const pending = rows.filter((r) => r.status === "PENDING").length;
 
   return (
@@ -108,7 +115,7 @@ function PtmList({
                   <p className="font-semibold text-navy-700">{fmt(r.slot)}</p>
                   <StatusPill status={r.status} />
                 </div>
-                {showStudent && <p className="text-xs font-medium text-navy-500">{r.student.user.name}</p>}
+                {showStudent && <p className="text-xs font-medium text-navy-500">{r.student?.user?.name ?? "Student"}</p>}
                 {r.note && <p className="mt-1.5 text-sm text-navy-600">{r.note}</p>}
               </div>
             </div>
