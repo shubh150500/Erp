@@ -1,0 +1,474 @@
+// Triple Entente — Prisma schema (SQLite for dev; swap provider+url for Postgres later)
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+enum Role {
+  ADMIN
+  TEACHER
+  STUDENT
+  PARENT
+}
+
+enum InquiryStatus {
+  NEW
+  CONTACTED
+  ENROLLED
+  CLOSED
+}
+
+enum PaymentMode {
+  CASH
+  UPI
+  CARD
+  BANK
+  CHEQUE
+}
+
+enum AttendanceStatus {
+  PRESENT
+  ABSENT
+  LATE
+  EXCUSED
+}
+
+enum SlipStatus {
+  PENDING
+  PAID
+  REJECTED
+}
+
+enum RequestStatus {
+  PENDING
+  APPROVED
+  REJECTED
+}
+
+model User {
+  id           String   @id @default(cuid())
+  email        String   @unique
+  passwordHash String
+  name         String
+  role         Role
+  phone        String?
+  createdAt    DateTime @default(now())
+
+  student Student?
+  teacher Teacher?
+  parent  Parent?
+
+  notices       Notice[]       @relation("NoticeAuthor")
+  notifications Notification[]
+}
+
+model Course {
+  id          String   @id @default(cuid())
+  slug        String   @unique
+  name        String
+  classes     String
+  description String?
+  batches     Batch[]
+  createdAt   DateTime @default(now())
+}
+
+model Batch {
+  id        String   @id @default(cuid())
+  name      String
+  year      String
+  courseId  String
+  course    Course   @relation(fields: [courseId], references: [id], onDelete: Cascade)
+  teacherId String?
+  teacher   Teacher? @relation(fields: [teacherId], references: [id])
+  feeAmount Float    @default(0)
+  createdAt DateTime @default(now())
+
+  enrollments Enrollment[]
+  attendance  Attendance[]
+  exams       Exam[]
+  homeworks   Homework[]
+  materials   StudyMaterial[]
+  doubts      Doubt[]
+  lessonPlans LessonPlan[]
+  videos      VideoLecture[]
+}
+
+model Teacher {
+  id            String           @id @default(cuid())
+  userId        String           @unique
+  user          User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  subject       String?
+  bio           String?
+  monthlySalary Float            @default(0)
+  // HR / payroll profile
+  staffType     String           @default("TEACHING") // TEACHING | NON_TEACHING
+  designation   String?
+  joinDate      DateTime?
+  bankName      String?
+  bankAccount   String?
+  ifsc          String?
+  batches       Batch[]
+  salaryPayments SalaryPayment[]
+  attendance    TeacherAttendance[]
+  createdAt     DateTime         @default(now())
+}
+
+model Student {
+  id           String   @id @default(cuid())
+  userId       String   @unique
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  rollNo       String   @unique
+  className    String
+  guardianName String?
+  parentId     String?
+  parent       Parent?  @relation(fields: [parentId], references: [id])
+  createdAt    DateTime @default(now())
+
+  enrollments Enrollment[]
+  payments    Payment[]
+  attendance  Attendance[]
+  marks       Mark[]
+  feeSlips    FeeSlip[]
+  doubts      Doubt[]
+  remarks     Remark[]
+  leaves      LeaveApplication[]
+  ptmBookings PtmBooking[]
+}
+
+model Parent {
+  id        String    @id @default(cuid())
+  userId    String    @unique
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  children  Student[]
+  createdAt DateTime  @default(now())
+}
+
+model Enrollment {
+  id        String   @id @default(cuid())
+  studentId String
+  student   Student  @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  batchId   String
+  batch     Batch    @relation(fields: [batchId], references: [id], onDelete: Cascade)
+  joinedAt  DateTime @default(now())
+
+  @@unique([studentId, batchId])
+}
+
+model Payment {
+  id          String      @id @default(cuid())
+  studentId   String
+  student     Student     @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  amount      Float
+  mode        PaymentMode @default(CASH)
+  receiptNo   String      @unique
+  forMonth    String?
+  note        String?
+  paidAt      DateTime    @default(now())
+
+  feeSlip FeeSlip?
+}
+
+model Attendance {
+  id        String           @id @default(cuid())
+  studentId String
+  student   Student          @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  batchId   String
+  batch     Batch            @relation(fields: [batchId], references: [id], onDelete: Cascade)
+  date      DateTime
+  status    AttendanceStatus @default(PRESENT)
+
+  @@unique([studentId, batchId, date])
+}
+
+model Exam {
+  id        String   @id @default(cuid())
+  title     String
+  subject   String
+  batchId   String
+  batch     Batch    @relation(fields: [batchId], references: [id], onDelete: Cascade)
+  maxMarks  Float    @default(100)
+  date      DateTime @default(now())
+  syllabus  String? // topics/chapters to prepare (shown in the test schedule)
+  marks     Mark[]
+}
+
+model Mark {
+  id        String  @id @default(cuid())
+  examId    String
+  exam      Exam    @relation(fields: [examId], references: [id], onDelete: Cascade)
+  studentId String
+  student   Student @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  score     Float
+  remark    String?
+
+  @@unique([examId, studentId])
+}
+
+model Inquiry {
+  id        String        @id @default(cuid())
+  name      String
+  phone     String
+  email     String?
+  className String
+  message   String?
+  status    InquiryStatus @default(NEW)
+  createdAt DateTime      @default(now())
+}
+
+model Notice {
+  id        String   @id @default(cuid())
+  title     String
+  body      String
+  audience  String   @default("ALL")
+  authorId  String
+  author    User     @relation("NoticeAuthor", fields: [authorId], references: [id])
+  createdAt DateTime @default(now())
+}
+
+model FeeSlip {
+  id          String      @id @default(cuid())
+  slipNo      String      @unique
+  studentId   String
+  student     Student     @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  amount      Float
+  mode        PaymentMode @default(CASH)
+  forMonth    String?
+  note        String?
+  status      SlipStatus  @default(PENDING)
+  receiptNo   String?
+  paymentId   String?     @unique
+  payment     Payment?    @relation(fields: [paymentId], references: [id])
+  reviewedAt  DateTime?
+  reviewNote  String?
+  createdById String
+  createdAt   DateTime    @default(now())
+
+  // UPI / online payment proof (student uploads a screenshot; admin verifies)
+  proofImage  String? // public path to the uploaded payment screenshot
+  txnRef      String? // UPI reference / UTR number entered by the student
+  submittedAt DateTime? // when the student uploaded the payment proof
+}
+
+model Notification {
+  id        String   @id @default(cuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  title     String
+  body      String
+  href      String?
+  read      Boolean  @default(false)
+  createdAt DateTime @default(now())
+}
+
+// Homework set by a teacher for a batch; visible to students/parents of that batch.
+model Homework {
+  id          String    @id @default(cuid())
+  title       String
+  details     String
+  subject     String?
+  batchId     String
+  batch       Batch     @relation(fields: [batchId], references: [id], onDelete: Cascade)
+  attachment  String? // optional public path to an attached file
+  dueDate     DateTime?
+  createdById String
+  createdAt   DateTime  @default(now())
+}
+
+// Study material (PDF/notes) uploaded by a teacher for a batch.
+model StudyMaterial {
+  id           String   @id @default(cuid())
+  title        String
+  subject      String?
+  batchId      String
+  batch        Batch    @relation(fields: [batchId], references: [id], onDelete: Cascade)
+  fileUrl      String // public path to the uploaded file
+  fileName     String // original filename, shown to students
+  uploadedById String
+  createdAt    DateTime @default(now())
+}
+
+// A video lecture shared as a link (YouTube/Vimeo/etc.) for a batch.
+model VideoLecture {
+  id          String   @id @default(cuid())
+  title       String
+  subject     String?
+  batchId     String
+  batch       Batch    @relation(fields: [batchId], references: [id], onDelete: Cascade)
+  url         String // external video link (YouTube/Vimeo/etc.)
+  createdById String
+  createdAt   DateTime @default(now())
+}
+
+// A doubt/question raised by a student; answered by a teacher.
+model Doubt {
+  id           String    @id @default(cuid())
+  studentId    String
+  student      Student   @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  batchId      String?
+  batch        Batch?    @relation(fields: [batchId], references: [id])
+  subject      String?
+  question     String
+  image        String? // optional attached screenshot/photo
+  answer       String?
+  answeredById String?
+  answeredAt   DateTime?
+  createdAt    DateTime  @default(now())
+}
+
+// A remark a teacher records about a student (behaviour, progress, etc.).
+model Remark {
+  id        String   @id @default(cuid())
+  studentId String
+  student   Student  @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  teacherId String // user id of the teacher who wrote it
+  body      String
+  createdAt DateTime @default(now())
+}
+
+// A complaint or suggestion submitted by a student/parent; handled by admin.
+model Complaint {
+  id        String   @id @default(cuid())
+  userId    String // submitter (student or parent) user id
+  category  String   @default("COMPLAINT") // COMPLAINT | SUGGESTION
+  subject   String
+  body      String
+  status    String   @default("OPEN") // OPEN | RESOLVED
+  response  String?
+  createdAt DateTime @default(now())
+}
+
+// A leave request raised for a student; approved/rejected by teacher/admin.
+model LeaveApplication {
+  id          String        @id @default(cuid())
+  studentId   String
+  student     Student       @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  raisedById  String // user id of the student/parent who raised it
+  fromDate    DateTime
+  toDate      DateTime
+  reason      String
+  status      RequestStatus @default(PENDING)
+  decidedById String?
+  decidedAt   DateTime?
+  createdAt   DateTime      @default(now())
+}
+
+// A parent-teacher meeting slot requested by a parent/student.
+model PtmBooking {
+  id           String        @id @default(cuid())
+  studentId    String
+  student      Student       @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  requestedById String // user id of requester (parent/student)
+  slot         DateTime
+  note         String?
+  status       RequestStatus @default(PENDING)
+  decidedById  String?
+  createdAt    DateTime      @default(now())
+}
+
+// A teacher's daily attendance, marked by admin.
+model TeacherAttendance {
+  id        String           @id @default(cuid())
+  teacherId String
+  teacher   Teacher          @relation(fields: [teacherId], references: [id], onDelete: Cascade)
+  date      DateTime
+  status    AttendanceStatus @default(PRESENT)
+  note      String?
+
+  @@unique([teacherId, date])
+}
+
+// A salary payment made to a teacher for a given month.
+model SalaryPayment {
+  id          String      @id @default(cuid())
+  teacherId   String
+  teacher     Teacher     @relation(fields: [teacherId], references: [id], onDelete: Cascade)
+  amount      Float // net salary actually due (gross + bonus - deductions - advance)
+  gross       Float? // base/gross pay before adjustments
+  bonus       Float       @default(0)
+  deductions  Float       @default(0)
+  advance     Float       @default(0)
+  status      String      @default("PAID") // PAID | PENDING | PARTIAL
+  paidAmount  Float? // amount actually paid out (for PARTIAL); null = full `amount`
+  forMonth    String // e.g. "2026-06"
+  mode        PaymentMode @default(BANK)
+  note        String?
+  paidAt      DateTime    @default(now())
+  createdById String
+}
+
+// A teacher's lesson plan entry; doubles as the teaching log + syllabus
+// completion tracker. Marked DONE (with an optional log note) once taught.
+model LessonPlan {
+  id          String    @id @default(cuid())
+  batchId     String
+  batch       Batch     @relation(fields: [batchId], references: [id], onDelete: Cascade)
+  subject     String?
+  topic       String
+  objective   String? // what the lesson should achieve
+  plannedDate DateTime?
+  status      String    @default("PLANNED") // PLANNED | DONE
+  logNote     String? // teaching-log note recorded when marked done
+  completedAt DateTime?
+  createdById String // teacher/admin user id
+  createdAt   DateTime  @default(now())
+}
+
+// A bulk message a teacher/admin sends to a batch (or all batches).
+// Fans out to in-app notifications; this row is the sender's sent-history log.
+model BroadcastMessage {
+  id             String   @id @default(cuid())
+  title          String
+  body           String
+  batchId        String? // null = all of the sender's batches
+  batchName      String? // denormalised label for the history log
+  audience       String   @default("STUDENTS") // STUDENTS | PARENTS | BOTH
+  recipientCount Int      @default(0)
+  sentById       String
+  createdAt      DateTime @default(now())
+}
+
+// An immutable record of a sensitive admin action (fee verification, expense
+// edit, salary payment, etc.) — the institute's finance audit trail.
+model AuditLog {
+  id        String   @id @default(cuid())
+  actorId   String // user id who performed the action
+  actorName String // denormalised name for display (survives user deletion)
+  action    String // e.g. FEE_VERIFIED | EXPENSE_ADDED | SALARY_PAID
+  entity    String // e.g. FeeSlip | Expense | SalaryPayment
+  entityId  String? // id of the affected row, when applicable
+  summary   String // human-readable one-line description
+  createdAt DateTime @default(now())
+
+  @@index([createdAt])
+  @@index([action])
+}
+
+// An institute expense recorded by admin (rent, salary, utilities, etc.).
+// Income is tracked via Payment; together they drive the P&L view.
+model Expense {
+  id          String   @id @default(cuid())
+  title       String
+  category    String   @default("OTHER") // RENT | SALARY | UTILITIES | SUPPLIES | MARKETING | MAINTENANCE | OTHER
+  amount      Float
+  note        String?
+  invoiceImage String? // public path to the uploaded invoice/bill (PDF or image)
+  spentAt     DateTime @default(now())
+  createdById String // admin user id who recorded it
+  createdAt   DateTime @default(now())
+}
+
+model OtherIncome {
+  id          String   @id @default(cuid())
+  title       String
+  category    String   @default("OTHER") // DONATION | BOOK_SALE | UNIFORM | EVENT | RENT_INCOME | OTHER
+  amount      Float
+  note        String?
+  receivedAt  DateTime @default(now())
+  createdById String // admin user id who recorded it
+  createdAt   DateTime @default(now())
+}

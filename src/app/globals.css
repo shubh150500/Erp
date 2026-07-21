@@ -1,0 +1,107 @@
+@import "tailwindcss";
+
+/*
+  Triple Entente design system — premium academic.
+  Deep navy + gold accents on ivory. Serif display headings, sans body.
+*/
+@theme {
+  --color-navy-50: #eef1f8;
+  --color-navy-100: #d3dbed;
+  --color-navy-200: #a7b6db;
+  --color-navy-300: #7790c4;
+  --color-navy-400: #4d68a6;
+  --color-navy-500: #2f487f;
+  --color-navy-600: #13245c;
+  --color-navy-700: #0d1b3e;
+  --color-navy-800: #091331;
+  --color-navy-900: #060d24;
+
+  --color-gold-300: #efd98a;
+  --color-gold-400: #e3c15a;
+  --color-gold-500: #c9a227;
+  --color-gold-600: #a8851b;
+
+  --color-ivory: #f8f6f0;
+  --color-ivory-dark: #efe9dc;
+
+  --font-serif: var(--font-display), Georgia, "Times New Roman", serif;
+  --font-sans: var(--font-body), ui-sans-serif, system-ui, sans-serif;
+
+  --shadow-card: 0 10px 30px -12px rgba(13, 27, 62, 0.18);
+  --shadow-lift: 0 22px 48px -20px rgba(13, 27, 62, 0.35);
+}
+
+:root {
+  --background: #f8f6f0;
+  --foreground: #0d1b3e;
+}
+
+@layer base {
+  body {
+    background: var(--background);
+    color: var(--foreground);
+    font-family: var(--font-sans);
+    -webkit-font-smoothing: antialiased;
+  }
+  h1, h2, h3, h4 {
+    font-family: var(--font-serif);
+    letter-spacing: -0.01em;
+  }
+}
+
+@layer utilities {
+  .container-page {
+    width: 100%;
+    margin-inline: auto;
+    max-width: 80rem;
+    padding-inline: 1.25rem;
+  }
+  @media (min-width: 768px) {
+    .container-page { padding-inline: 2rem; }
+  }
+
+  /* Animated scroll-reveal */
+  .reveal {
+    opacity: 0;
+    transform: translateY(18px);
+    animation: reveal 0.7s ease forwards;
+  }
+  @keyframes reveal {
+    to { opacity: 1; transform: translateY(0); }
+  }
+
+  .text-gradient-gold {
+    background: linear-gradient(90deg, #e3c15a, #c9a227);
+    -webkit-background-clip: text;
+    background-clip: text;
+    color: transparent;
+  }
+
+  .bg-grid {
+    background-image:
+      linear-gradient(rgba(255, 255, 255, 0.05) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(255, 255, 255, 0.05) 1px, transparent 1px);
+    background-size: 44px 44px;
+  }
+}
+
+/* Print: show only the slip/receipt document on an A4 page */
+@media print {
+  @page {
+    size: A4;
+    margin: 12mm;
+  }
+  body * {
+    visibility: hidden !important;
+  }
+  #print-doc,
+  #print-doc * {
+    visibility: visible !important;
+  }
+  #print-doc {
+    position: absolute;
+    left: 0;
+    top: 0;
+    width: 100%;
+  }
+}
