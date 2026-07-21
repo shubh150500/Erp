@@ -8,7 +8,6 @@ export const metadata = { title: "Analytics" };
 const inr = (n: number) => "₹" + n.toLocaleString("en-IN", { maximumFractionDigits: 0 });
 const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 
-/** Last `count` months as {year, month, label}, oldest first. */
 function lastMonths(count: number) {
   const now = new Date();
   const out: { year: number; month: number; label: string }[] = [];
@@ -25,37 +24,59 @@ export default async function AnalyticsPage() {
   const months = lastMonths(6);
   const since = new Date(months[0].year, months[0].month, 1);
 
-  const [
-    payments,
-    expenses,
-    attnTotal,
-    attnPresent,
-    enrolByBatch,
-    inquiries,
-    studentCount,
-    teacherCount,
-  ] = await Promise.all([
-    prisma.payment.findMany({ where: { paidAt: { gte: since } }, select: { amount: true, paidAt: true } }),
-    prisma.expense.findMany({ where: { spentAt: { gte: since } }, select: { amount: true, spentAt: true } }),
-    prisma.attendance.count(),
-    prisma.attendance.count({ where: { status: { in: ["PRESENT", "LATE"] } } }),
-    prisma.batch.findMany({
-      select: { id: true, name: true, _count: { select: { enrollments: true } } },
-      orderBy: { enrollments: { _count: "desc" } },
-      take: 8,
-    }),
-    prisma.inquiry.groupBy({ by: ["status"], _count: true }),
-    prisma.student.count(),
-    prisma.teacher.count(),
-  ]);
+  let payments: any[] = [];
+  let expenses: any[] = [];
+  let attnTotal = 0;
+  let attnPresent = 0;
+  let enrolByBatch: any[] = [];
+  let inquiries: any[] = [];
+  let studentCount = 0;
+  let teacherCount = 0;
+
+  try {
+    const [
+      paymentsRes,
+      expensesRes,
+      attnTotalRes,
+      attnPresentRes,
+      enrolByBatchRes,
+      inquiriesRes,
+      studentCountRes,
+      teacherCountRes,
+    ] = await Promise.all([
+      prisma.payment.findMany({ where: { paidAt: { gte: since } }, select: { amount: true, paidAt: true } }).catch(() => []),
+      prisma.expense.findMany({ where: { spentAt: { gte: since } }, select: { amount: true, spentAt: true } }).catch(() => []),
+      prisma.attendance.count().catch(() => 0),
+      prisma.attendance.count({ where: { status: { in: ["PRESENT", "LATE"] } } }).catch(() => 0),
+      prisma.batch.findMany({
+        select: { id: true, name: true, _count: { select: { enrollments: true } } },
+        orderBy: { enrollments: { _count: "desc" } },
+        take: 8,
+      }).catch(() => []),
+      prisma.inquiry.groupBy({ by: ["status"], _count: true }).catch(() => []),
+      prisma.student.count().catch(() => 0),
+      prisma.teacher.count().catch(() => 0),
+    ]);
+
+    payments = paymentsRes;
+    expenses = expensesRes;
+    attnTotal = attnTotalRes;
+    attnPresent = attnPresentRes;
+    enrolByBatch = enrolByBatchRes;
+    inquiries = inquiriesRes;
+    studentCount = studentCountRes;
+    teacherCount = teacherCountRes;
+  } catch (err) {
+    console.error("Analytics query failed:", err);
+  }
 
   // Monthly income vs expense series.
   const series = months.map((m) => {
     const income = payments
-      .filter((p) => p.paidAt.getFullYear() === m.year && p.paidAt.getMonth() === m.month)
+      .filter((p) => p.paidAt && new Date(p.paidAt).getFullYear() === m.year && new Date(p.paidAt).getMonth() === m.month)
       .reduce((s, p) => s + p.amount, 0);
     const expense = expenses
-      .filter((e) => e.spentAt.getFullYear() === m.year && e.spentAt.getMonth() === m.month)
+      .filter((e) => e.spentAt && new Date(e.spentAt).getFullYear() === m.year && new Date(e.spentAt).getMonth() === m.month)
       .reduce((s, e) => s + e.amount, 0);
     return { label: m.label, income, expense };
   });
@@ -65,7 +86,7 @@ export default async function AnalyticsPage() {
 
   const attnRate = attnTotal === 0 ? null : Math.round((attnPresent / attnTotal) * 100);
 
-  const maxEnrol = Math.max(1, ...enrolByBatch.map((b) => b._count.enrollments));
+  const maxEnrol = Math.max(1, ...enrolByBatch.map((b) => b._count?.enrollments ?? 0));
 
   const funnelOrder: InquiryStatus[] = ["NEW", "CONTACTED", "ENROLLED", "CLOSED"];
   const inqMap = new Map(inquiries.map((i) => [i.status, i._count]));
@@ -124,12 +145,12 @@ export default async function AnalyticsPage() {
                 <li key={b.id}>
                   <div className="flex items-center justify-between text-sm">
                     <span className="text-navy-600">{b.name}</span>
-                    <span className="font-medium text-navy-700">{b._count.enrollments}</span>
+                    <span className="font-medium text-navy-700">{b._count?.enrollments ?? 0}</span>
                   </div>
                   <div className="mt-1 h-2 w-full overflow-hidden rounded-full bg-navy-100">
                     <div
                       className="h-full rounded-full bg-navy-600"
-                      style={{ width: `${(b._count.enrollments / maxEnrol) * 100}%` }}
+                      style={{ width: `${((b._count?.enrollments ?? 0) / maxEnrol) * 100}%` }}
                     />
                   </div>
                 </li>

@@ -8,9 +8,15 @@ export const metadata = { title: "Admissions" };
 
 export default async function AdmissionsPage() {
   await requireRole(["ADMIN"]);
-  const inquiries = await prisma.inquiry.findMany({
-    orderBy: { createdAt: "desc" },
-  });
+  
+  let inquiries: any[] = [];
+  try {
+    inquiries = await prisma.inquiry.findMany({
+      orderBy: { createdAt: "desc" },
+    }).catch(() => []);
+  } catch (err) {
+    console.error("Admissions query failed:", err);
+  }
 
   return (
     <>
@@ -53,10 +59,10 @@ export default async function AdmissionsPage() {
                       {q.message || "—"}
                     </td>
                     <td className="px-5 py-3.5 text-navy-500 whitespace-nowrap">
-                      {q.createdAt.toLocaleDateString("en-IN", {
+                      {q.createdAt ? new Date(q.createdAt).toLocaleDateString("en-IN", {
                         day: "numeric",
                         month: "short",
-                      })}
+                      }) : "—"}
                     </td>
                     <td className="px-5 py-3.5">
                       <StatusSelect id={q.id} current={q.status} />
