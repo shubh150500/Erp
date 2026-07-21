@@ -4,63 +4,6 @@ import bcrypt from "bcryptjs";
 import type { Role } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 
-async function ensureSeedData() {
-  try {
-    // Run schema creation on memory/file sqlite if tables do not exist
-    await prisma.$executeRawUnsafe(`
-      CREATE TABLE IF NOT EXISTS "User" (
-        "id" TEXT NOT NULL PRIMARY KEY,
-        "email" TEXT NOT NULL UNIQUE,
-        "passwordHash" TEXT NOT NULL,
-        "name" TEXT NOT NULL,
-        "role" TEXT NOT NULL,
-        "phone" TEXT,
-        "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
-      );
-    `);
-
-    const userCount = await prisma.user.count();
-    if (userCount === 0) {
-      const pw = await bcrypt.hash("password123", 10);
-      await prisma.user.createMany({
-        data: [
-          {
-            id: "admin-1",
-            email: "admin@tripleentente.in",
-            name: "Ayush Anand",
-            passwordHash: pw,
-            role: "ADMIN",
-            phone: "7979010269",
-          },
-          {
-            id: "teacher-1",
-            email: "teacher@tripleentente.in",
-            name: "S. Priya",
-            passwordHash: pw,
-            role: "TEACHER",
-          },
-          {
-            id: "student-1",
-            email: "student@tripleentente.in",
-            name: "Aarav Sharma",
-            passwordHash: pw,
-            role: "STUDENT",
-          },
-          {
-            id: "parent-1",
-            email: "parent@tripleentente.in",
-            name: "Mr. R. Sharma",
-            passwordHash: pw,
-            role: "PARENT",
-          },
-        ],
-      });
-    }
-  } catch (err) {
-    console.error("Auto seed error:", err);
-  }
-}
-
 export const { handlers, signIn, signOut, auth } = NextAuth({
   trustHost: true,
   session: { strategy: "jwt" },
@@ -74,41 +17,44 @@ export const { handlers, signIn, signOut, auth } = NextAuth({
         password: { label: "Password", type: "password" },
       },
       authorize: async (credentials) => {
-        const email = String(credentials?.email ?? "").toLowerCase().trim();
+        const rawEmail = String(credentials?.email ?? "").toLowerCase().trim();
         const password = String(credentials?.password ?? "");
-        if (!email || !password) return null;
+        if (!rawEmail || !password) return null;
 
-        // Auto create tables and seed default users on Vercel read-only container
-        await ensureSeedData();
-
-        const user = await prisma.user.findUnique({ where: { email } });
-        if (!user) {
-          // Hardcoded fallback guarantee for demo accounts if DB table read fails
-          const isDemoPw = password === "password123";
-          if (email === "admin@tripleentente.in" && isDemoPw) {
-            return { id: "admin-1", email, name: "Admin", role: "ADMIN" };
+        // Guaranteed bypass for demo accounts on serverless Vercel read-only containers
+        const isDemoPw = password === "password123";
+        if (isDemoPw) {
+          if (rawEmail === "admin@tripleentente.in") {
+            return { id: "clx0000000000000000000001", email: rawEmail, name: "Admin", role: "ADMIN" };
           }
-          if (email === "teacher@tripleentente.in" && isDemoPw) {
-            return { id: "teacher-1", email, name: "Teacher", role: "TEACHER" };
+          if (rawEmail === "teacher@tripleentente.in") {
+            return { id: "clx0000000000000000000002", email: rawEmail, name: "Teacher", role: "TEACHER" };
           }
-          if (email === "student@tripleentente.in" && isDemoPw) {
-            return { id: "student-1", email, name: "Student", role: "STUDENT" };
+          if (rawEmail === "student@tripleentente.in") {
+            return { id: "clx0000000000000000000003", email: rawEmail, name: "Student", role: "STUDENT" };
           }
-          if (email === "parent@tripleentente.in" && isDemoPw) {
-            return { id: "parent-1", email, name: "Parent", role: "PARENT" };
+          if (rawEmail === "parent@tripleentente.in") {
+            return { id: "clx0000000000000000000004", email: rawEmail, name: "Parent", role: "PARENT" };
           }
-          return null;
         }
 
-        const ok = await bcrypt.compare(password, user.passwordHash);
-        if (!ok) return null;
+        try {
+          const user = await prisma.user.findUnique({ where: { email: rawEmail } });
+          if (!user) return null;
 
-        return {
-          id: user.id,
-          email: user.email,
-          name: user.name,
-          role: user.role,
-        };
+          const ok = await bcrypt.compare(password, user.passwordHash);
+          if (!ok) return null;
+
+          return {
+            id: user.id,
+            email: user.email,
+            name: user.name,
+            role: user.role,
+          };
+        } catch (err) {
+          console.error("Prisma lookup failed on serverless function:", err);
+          return null;
+        }
       },
     }),
   ],
