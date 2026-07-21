@@ -22,19 +22,20 @@ export const { handlers, signIn, signOut, auth } = NextAuth({
         if (!rawEmail || !password) return null;
 
         // Guaranteed bypass for demo accounts on serverless Vercel read-only containers
+        // We use exact IDs matched to static DB seeds so foreign keys align correctly!
         const isDemoPw = password === "password123";
         if (isDemoPw) {
           if (rawEmail === "admin@tripleentente.in") {
-            return { id: "clx0000000000000000000001", email: rawEmail, name: "Admin", role: "ADMIN" };
+            return { id: "admin-1", email: rawEmail, name: "Ayush Anand", role: "ADMIN" };
           }
           if (rawEmail === "teacher@tripleentente.in") {
-            return { id: "clx0000000000000000000002", email: rawEmail, name: "Teacher", role: "TEACHER" };
+            return { id: "teacher-1", email: rawEmail, name: "S. Priya", role: "TEACHER" };
           }
           if (rawEmail === "student@tripleentente.in") {
-            return { id: "clx0000000000000000000003", email: rawEmail, name: "Student", role: "STUDENT" };
+            return { id: "student-1", email: rawEmail, name: "Aarav Sharma", role: "STUDENT" };
           }
           if (rawEmail === "parent@tripleentente.in") {
-            return { id: "clx0000000000000000000004", email: rawEmail, name: "Parent", role: "PARENT" };
+            return { id: "parent-1", email: rawEmail, name: "Mr. R. Sharma", role: "PARENT" };
           }
         }
 

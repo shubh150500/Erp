@@ -1,5 +1,5 @@
 import { requireRole } from "@/lib/rbac";
-import { prisma } from "@/lib/prisma";
+import { prisma, safeQuery } from "@/lib/prisma";
 import { PageTitle, Panel, EmptyState } from "@/components/erp/ui";
 import { AddTeacherButton } from "./AddTeacherButton";
 
@@ -8,13 +8,17 @@ export const metadata = { title: "Staff" };
 export default async function StaffPage() {
   await requireRole(["ADMIN"]);
 
-  const teachers = await prisma.teacher.findMany({
-    include: {
-      user: true,
-      _count: { select: { batches: true } },
-    },
-    orderBy: { createdAt: "desc" },
-  });
+  const teachers = await safeQuery(
+    () =>
+      prisma.teacher.findMany({
+        include: {
+          user: true,
+          _count: { select: { batches: true } },
+        },
+        orderBy: { createdAt: "desc" },
+      }),
+    []
+  );
 
   const teachingCount = teachers.filter((t) => t.staffType !== "NON_TEACHING").length;
   const nonTeachingCount = teachers.length - teachingCount;
@@ -47,7 +51,7 @@ export default async function StaffPage() {
                   const nonTeaching = t.staffType === "NON_TEACHING";
                   return (
                     <tr key={t.id} className="hover:bg-ivory/40">
-                      <td className="px-5 py-3.5 font-medium text-navy-700">{t.user.name}</td>
+                      <td className="px-5 py-3.5 font-medium text-navy-700">{t.user?.name ?? "Teacher"}</td>
                       <td className="px-5 py-3.5">
                         <span
                           className={`inline-flex rounded-full px-2.5 py-0.5 text-xs font-semibold ${
@@ -58,9 +62,9 @@ export default async function StaffPage() {
                         </span>
                       </td>
                       <td className="px-5 py-3.5 text-navy-600">{t.subject ?? t.designation ?? "—"}</td>
-                      <td className="px-5 py-3.5 text-navy-500">{t.user.email}</td>
-                      <td className="px-5 py-3.5 text-navy-500">{t.user.phone ?? "—"}</td>
-                      <td className="px-5 py-3.5 text-navy-500">{t._count.batches}</td>
+                      <td className="px-5 py-3.5 text-navy-500">{t.user?.email ?? "—"}</td>
+                      <td className="px-5 py-3.5 text-navy-500">{t.user?.phone ?? "—"}</td>
+                      <td className="px-5 py-3.5 text-navy-500">{t._count?.batches ?? 0}</td>
                     </tr>
                   );
                 })}
