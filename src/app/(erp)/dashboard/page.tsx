@@ -32,20 +32,33 @@ function greeting(name: string) {
 }
 
 async function AdminOverview() {
-  const [students, teachers, batches, newInquiries, feeAgg, billedBatches, recent] =
-    await Promise.all([
-      prisma.student.count(),
-      prisma.teacher.count(),
-      prisma.batch.count(),
-      prisma.inquiry.count({ where: { status: "NEW" } }),
-      prisma.payment.aggregate({ _sum: { amount: true } }),
-      prisma.enrollment.findMany({ include: { batch: true } }),
-      prisma.inquiry.findMany({ orderBy: { createdAt: "desc" }, take: 5 }),
-    ]);
+  let students = 0, teachers = 0, batches = 0, newInquiries = 0;
+  let billed = 0, collected = 0, due = 0;
+  let recent: any[] = [];
 
-  const billed = billedBatches.reduce((s, e) => s + e.batch.feeAmount, 0);
-  const collected = feeAgg._sum.amount ?? 0;
-  const due = Math.max(0, billed - collected);
+  try {
+    const [studentsCount, teachersCount, batchesCount, newInquiriesCount, feeAgg, billedBatches, recentInquiries] =
+      await Promise.all([
+        prisma.student.count().catch(() => 0),
+        prisma.teacher.count().catch(() => 0),
+        prisma.batch.count().catch(() => 0),
+        prisma.inquiry.count({ where: { status: "NEW" } }).catch(() => 0),
+        prisma.payment.aggregate({ _sum: { amount: true } }).catch(() => ({ _sum: { amount: null } })),
+        prisma.enrollment.findMany({ include: { batch: true } }).catch(() => []),
+        prisma.inquiry.findMany({ orderBy: { createdAt: "desc" }, take: 5 }).catch(() => []),
+      ]);
+
+    students = studentsCount;
+    teachers = teachersCount;
+    batches = batchesCount;
+    newInquiries = newInquiriesCount;
+    billed = billedBatches.reduce((s, e) => s + e.batch.feeAmount, 0);
+    collected = feeAgg._sum.amount ?? 0;
+    due = Math.max(0, billed - collected);
+    recent = recentInquiries;
+  } catch (err) {
+    console.error("AdminOverview query failed:", err);
+  }
 
   return (
     <div className="space-y-7">
@@ -92,24 +105,35 @@ async function AdminOverview() {
 }
 
 async function TeacherOverview({ userId }: { userId: string }) {
-  const teacher = await prisma.teacher.findUnique({
-    where: { userId },
-    include: {
-      batches: {
-        include: { _count: { select: { enrollments: true } }, course: true },
-      },
-    },
-  });
+  let batches: any[] = [];
+  let totalStudents = 0;
+  let subject = "—";
 
-  const batches = teacher?.batches ?? [];
-  const totalStudents = batches.reduce((s, b) => s + b._count.enrollments, 0);
+  try {
+    const teacher = await prisma.teacher.findUnique({
+      where: { userId },
+      include: {
+        batches: {
+          include: { _count: { select: { enrollments: true } }, course: true },
+        },
+      },
+    });
+
+    if (teacher) {
+      batches = teacher.batches ?? [];
+      totalStudents = batches.reduce((s, b) => s + b._count.enrollments, 0);
+      subject = teacher.subject ?? "—";
+    }
+  } catch (err) {
+    console.error("TeacherOverview query failed:", err);
+  }
 
   return (
     <div className="space-y-7">
       <div className="grid gap-5 sm:grid-cols-3">
         <StatCard label="My batches" value={batches.length} />
         <StatCard label="My students" value={totalStudents} />
-        <StatCard label="Subject" value={teacher?.subject ?? "—"} tone="gold" />
+        <StatCard label="Subject" value={subject} tone="gold" />
       </div>
 
       <Panel title="My batches">
@@ -139,13 +163,25 @@ async function TeacherOverview({ userId }: { userId: string }) {
 }
 
 async function StudentOverview({ userId }: { userId: string }) {
-  const student = await studentByUser(userId);
-  if (!student) return <EmptyState message="Student profile not found." />;
+  let student: any = null;
+  let pct: number | null = null;
+  let fees = { billed: 0, paid: 0, due: 0 };
 
-  const [pct, fees] = await Promise.all([
-    attendancePct(student.id),
-    feeSummary(student.id),
-  ]);
+  try {
+    student = await studentByUser(userId);
+    if (student) {
+      const [attendanceResult, feeResult] = await Promise.all([
+        attendancePct(student.id).catch(() => null),
+        feeSummary(student.id).catch(() => ({ billed: 0, paid: 0, due: 0 })),
+      ]);
+      pct = attendanceResult;
+      fees = feeResult;
+    }
+  } catch (err) {
+    console.error("StudentOverview query failed:", err);
+  }
+
+  if (!student) return <EmptyState message="Student profile not found." />;
 
   return (
     <div className="space-y-7">
@@ -161,7 +197,7 @@ async function StudentOverview({ userId }: { userId: string }) {
           <EmptyState message="Not enrolled in any batch yet." />
         ) : (
           <ul className="divide-y divide-navy-100">
-            {student.enrollments.map((e) => (
+            {student.enrollments.map((e: any) => (
               <li key={e.id} className="px-5 py-3.5">
                 <p className="font-medium text-navy-700">{e.batch.name}</p>
                 <p className="text-xs text-navy-500">{e.batch.year}</p>
@@ -181,15 +217,20 @@ async function StudentOverview({ userId }: { userId: string }) {
 }
 
 async function ParentOverview({ userId }: { userId: string }) {
-  const children = await childrenByParentUser(userId);
+  let cards: any[] = [];
 
-  const cards = await Promise.all(
-    children.map(async (c) => ({
-      child: c,
-      pct: await attendancePct(c.id),
-      fees: await feeSummary(c.id),
-    }))
-  );
+  try {
+    const children = await childrenByParentUser(userId);
+    cards = await Promise.all(
+      children.map(async (c) => ({
+        child: c,
+        pct: await attendancePct(c.id).catch(() => null),
+        fees: await feeSummary(c.id).catch(() => ({ billed: 0, paid: 0, due: 0 })),
+      }))
+    );
+  } catch (err) {
+    console.error("ParentOverview query failed:", err);
+  }
 
   return (
     <div className="space-y-7">
