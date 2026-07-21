@@ -121,7 +121,7 @@ async function ParentSlips({ userId }: { userId: string }) {
     children.map(async (c) => ({
       id: c.id,
       label: `${c.user?.name ?? "Student"} (${c.rollNo})`,
-      due: (await safeQuery(() => feeSummary(c.id), { due: 0 })).due,
+      due: (await safeQuery(() => feeSummary(c.id), { billed: 0, paid: 0, due: 0 })).due,
     }))
   );
   const slips = await safeQuery(() => slipsForStudents(children.map((c) => c.id)), []);
