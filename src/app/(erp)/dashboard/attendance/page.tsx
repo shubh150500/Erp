@@ -1,5 +1,5 @@
 import { requireUser } from "@/lib/rbac";
-import { prisma } from "@/lib/prisma";
+import { prisma, safeQuery } from "@/lib/prisma";
 import { attendancePct, studentByUser, childrenByParentUser } from "@/lib/dal";
 import { PageTitle, Panel, EmptyState, StatCard, StatusPill } from "@/components/erp/ui";
 import { AttendanceMarker } from "./AttendanceMarker";
@@ -17,25 +17,29 @@ export default async function AttendancePage() {
 }
 
 async function MarkView({ role, userId }: { role: string; userId: string }) {
-  const batches = await prisma.batch.findMany({
-    where:
-      role === "TEACHER"
-        ? { teacher: { userId } }
-        : {},
-    include: {
-      enrollments: { include: { student: { include: { user: true } } } },
-    },
-    orderBy: { name: "asc" },
-  });
+  const batches = await safeQuery(
+    () =>
+      prisma.batch.findMany({
+        where:
+          role === "TEACHER"
+            ? { teacher: { userId } }
+            : {},
+        include: {
+          enrollments: { include: { student: { include: { user: true } } } },
+        },
+        orderBy: { name: "asc" },
+      }),
+    []
+  );
 
   const data = batches.map((b) => ({
     id: b.id,
     name: b.name,
-    students: b.enrollments.map((e) => ({
-      id: e.student.id,
-      name: e.student.user.name,
-      rollNo: e.student.rollNo,
-    })),
+    students: (b.enrollments || []).map((e) => ({
+      id: e.student?.id,
+      name: e.student?.user?.name ?? "Student",
+      rollNo: e.student?.rollNo ?? "—",
+    })).filter((s) => s.id),
   }));
 
   return (
@@ -49,17 +53,20 @@ async function MarkView({ role, userId }: { role: string; userId: string }) {
 }
 
 async function StudentView({ userId }: { userId: string }) {
-  const student = await studentByUser(userId);
+  const student = await safeQuery(() => studentByUser(userId), null);
   if (!student) return <EmptyState message="Student profile not found." />;
-  const [pct, records] = await Promise.all([
-    attendancePct(student.id),
-    prisma.attendance.findMany({
-      where: { studentId: student.id },
-      include: { batch: true },
-      orderBy: { date: "desc" },
-      take: 30,
-    }),
-  ]);
+  
+  const pct = await attendancePct(student.id);
+  const records = await safeQuery(
+    () =>
+      prisma.attendance.findMany({
+        where: { studentId: student.id },
+        include: { batch: true },
+        orderBy: { date: "desc" },
+        take: 30,
+      }),
+    []
+  );
 
   return (
     <>
@@ -75,17 +82,21 @@ async function StudentView({ userId }: { userId: string }) {
 }
 
 async function ParentView({ userId }: { userId: string }) {
-  const children = await childrenByParentUser(userId);
+  const children = await safeQuery(() => childrenByParentUser(userId), []);
   const data = await Promise.all(
     children.map(async (c) => ({
       child: c,
       pct: await attendancePct(c.id),
-      records: await prisma.attendance.findMany({
-        where: { studentId: c.id },
-        include: { batch: true },
-        orderBy: { date: "desc" },
-        take: 15,
-      }),
+      records: await safeQuery(
+        () =>
+          prisma.attendance.findMany({
+            where: { studentId: c.id },
+            include: { batch: true },
+            orderBy: { date: "desc" },
+            take: 15,
+          }),
+        []
+      ),
     }))
   );
 
@@ -99,7 +110,7 @@ async function ParentView({ userId }: { userId: string }) {
           {data.map(({ child, pct, records }) => (
             <div key={child.id}>
               <div className="flex items-center gap-3 mb-3">
-                <h2 className="font-semibold text-navy-700">{child.user.name}</h2>
+                <h2 className="font-semibold text-navy-700">{child.user?.name ?? "Student"}</h2>
                 <StatCard label="" value={pct === null ? "—" : `${pct}%`} />
               </div>
               <AttendanceLog records={records} />
@@ -114,7 +125,7 @@ async function ParentView({ userId }: { userId: string }) {
 function AttendanceLog({
   records,
 }: {
-  records: { id: string; date: Date; status: string; batch: { name: string } }[];
+  records: any[];
 }) {
   return (
     <Panel title="Recent record">
@@ -126,9 +137,9 @@ function AttendanceLog({
             <li key={r.id} className="flex items-center justify-between px-5 py-3">
               <div>
                 <p className="font-medium text-navy-700">
-                  {r.date.toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" })}
+                  {r.date ? new Date(r.date).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" }) : "—"}
                 </p>
-                <p className="text-xs text-navy-400">{r.batch.name}</p>
+                <p className="text-xs text-navy-400">{r.batch?.name ?? "Batch"}</p>
               </div>
               <StatusPill status={r.status} />
             </li>
